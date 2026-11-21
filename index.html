@@ -2704,6 +2704,135 @@ function Glossary() {
   );
 }
 
+/* ---------- Cheat sheet: which operator, which layer ---------- */
+const CHEAT_LAYERS = [
+  ['UI (Activity / Compose)', 'Show state and send user actions. Collect state here, never call the network.'],
+  ['ViewModel', 'Hold screen state (StateFlow), combine inputs, search and retry logic, one-time events.'],
+  ['Repository', 'Decide where data comes from. Convert models, handle network errors, add timeouts and retries.'],
+  ['Data source', 'Room DAO, DataStore, Retrofit, sensors, listeners. Return Flow here when you can.'],
+];
+const CHEAT_QUESTIONS = [
+  ['Wrap a callback or listener as a Flow', 'callbackFlow', 'Data source'],
+  ['Several coroutines send into one flow', 'channelFlow', 'Data source'],
+  ['Build a flow from code (one producer)', 'flow { emit() }', 'Repository'],
+  ['Change each value', 'map (and mapNotNull to drop nulls)', 'Repository or ViewModel'],
+  ['Keep only some values', 'filter, drop(n), takeWhile', 'ViewModel'],
+  ['Skip repeated values', 'distinctUntilChanged', 'ViewModel'],
+  ['Combine two inputs, using the latest of each', 'combine', 'ViewModel'],
+  ['Combine, but decide what to emit', 'combineTransform', 'ViewModel'],
+  ['Pair values one-to-one', 'zip', 'ViewModel'],
+  ['Merge several sources, no pairing', 'merge', 'ViewModel'],
+  ['Wait for the user to stop typing', 'debounce', 'ViewModel'],
+  ['Only the newest search result matters', 'flatMapLatest (or transformLatest)', 'ViewModel'],
+  ['Run requests one at a time, in order', 'flatMapConcat', 'Repository or ViewModel'],
+  ['Run up to N requests at once', 'flatMapMerge(concurrency = N)', 'Repository'],
+  ['Running total (starts with a value)', 'runningFold (or scan)', 'ViewModel'],
+  ['Take only the first N', 'take(N)', 'ViewModel'],
+  ['Show loading first', 'onStart { emit(Loading) }', 'ViewModel'],
+  ['Fallback value when it fails', 'catch { emit(...) }', 'Repository'],
+  ['Retry, with growing delays', 'retryWhen { … delay(…) }', 'Repository'],
+  ['Retry a fixed number of times', 'retry(n)', 'Repository'],
+  ['Give up after a time limit', 'withTimeoutOrNull / timeout', 'Repository'],
+  ['Cleanup when the flow ends', 'onCompletion', 'Repository or use case'],
+  ['Move slow work off the main thread', 'flowOn(Dispatchers.IO)', 'Repository'],
+  ['Share one upstream between screens', 'shareIn', 'Repository'],
+  ['Expose screen state that survives rotation', 'stateIn(…, WhileSubscribed(5000))', 'ViewModel'],
+  ['One-time event (snackbar, navigation)', 'SharedFlow, or Channel and send()', 'ViewModel'],
+  ['Bounded queue between producer and consumer', 'Channel(capacity)', 'ViewModel or data source'],
+  ['Settings that persist', 'DataStore (Flow)', 'Data source'],
+  ['Database that updates the screen', 'Room DAO returning Flow', 'Data source'],
+  ['Long list loaded page by page', 'Pager (PagingData)', 'ViewModel'],
+  ['Show a Flow in Compose', 'collectAsStateWithLifecycle', 'UI'],
+  ['Turn a suspend call into Compose State', 'produceState', 'UI'],
+  ['Long effect that must use the newest value', 'rememberUpdatedState', 'UI'],
+  ['Avoid recomposing on every change', 'derivedStateOf', 'UI'],
+  ['Old code: observable holder', 'LiveData (legacy)', 'ViewModel'],
+  ['Old code: reactive streams', 'RxJava (subscribeOn / observeOn)', 'Repository'],
+  ['Test a Flow', 'Turbine (awaitItem)', 'Tests'],
+];
+const CHEAT_PAIRS = [
+  ['StateFlow vs SharedFlow', 'StateFlow is “what the screen shows now” (it replays the latest value). SharedFlow is “something happened once” (no replay by default).'],
+  ['emit vs send', 'emit() is used inside flow { }. send() is used inside channelFlow or on a Channel.'],
+  ['debounce vs sample vs conflate', 'debounce waits for silence. sample takes the latest value every N ms. conflate keeps only the newest value while the collector is busy.'],
+  ['flatMapLatest vs flatMapConcat vs flatMapMerge', 'Latest cancels the old one. Concat queues in order. Merge runs in parallel.'],
+  ['stateIn vs shareIn', 'stateIn gives a StateFlow (always has a value). shareIn gives a SharedFlow (events, optional replay).'],
+  ['retry vs retryWhen', 'retry(n) repeats immediately. retryWhen lets you wait (backoff) and decide based on the error.'],
+  ['flowOn vs collectLatest', 'flowOn moves the work above it to another thread. collectLatest cancels the previous block when a new value arrives.'],
+  ['“omit” (not a Flow word)', 'Use filter (keep matching), drop(n) (skip the first n) or takeWhile (stop at the first failure).'],
+];
+
+function CheatSheet() {
+  const [q, setQ] = useState('');
+  const term = q.trim().toLowerCase();
+  const hit = (...xs) => !term || xs.join(' ').toLowerCase().includes(term);
+  const layers = CHEAT_LAYERS.filter((r) => hit(...r));
+  const questions = CHEAT_QUESTIONS.filter((r) => hit(...r));
+  const pairs = CHEAT_PAIRS.filter((r) => hit(...r));
+  return (
+    <div className="mx-auto max-w-4xl space-y-8">
+      <header>
+        <div className="font-mono text-[11px] uppercase tracking-widest text-purple-300">Reference</div>
+        <h1 className="mt-1 font-mono text-2xl font-bold text-white sm:text-3xl">Cheat sheet</h1>
+        <p className="mt-1 text-slate-400">Find your question, see which operator to use and which layer it belongs in.</p>
+      </header>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search, e.g. “retry”, “screen state”, “Compose”…"
+        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+
+      {layers.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-cyan-300">1 · Which layer?</h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {layers.map(([name, use]) => (
+              <div key={name} className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+                <div className="font-semibold text-white">{name}</div>
+                <p className="mt-1 text-sm text-slate-300">{use}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {questions.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-cyan-300">2 · I want to…</h2>
+          <div className="overflow-x-auto rounded-xl border border-slate-800">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-900 text-xs uppercase tracking-wider text-slate-400">
+                <tr><th className="px-4 py-2">Question</th><th className="px-4 py-2">Use</th><th className="px-4 py-2">Layer</th></tr>
+              </thead>
+              <tbody>
+                {questions.map(([question, use, layer]) => (
+                  <tr key={question} className="border-t border-slate-800 align-top">
+                    <td className="px-4 py-2 text-slate-300">{question}</td>
+                    <td className="px-4 py-2 font-mono text-[13px] text-purple-200">{use}</td>
+                    <td className="px-4 py-2 text-slate-400">{layer}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {pairs.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-cyan-300">3 · Things people mix up</h2>
+          <div className="space-y-3">
+            {pairs.map(([name, text]) => (
+              <div key={name} className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+                <div className="font-mono text-sm font-semibold text-white">{name}</div>
+                <p className="mt-1 text-sm leading-relaxed text-slate-300">{text}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {layers.length + questions.length + pairs.length === 0 && <p className="text-sm text-slate-500">No match. Try another word.</p>}
+    </div>
+  );
+}
+
 /* ---------- Local progress & preferences (saved in this browser only) ---------- */
 const store = {
   get(key, fallback) {
@@ -2718,7 +2847,7 @@ const store = {
 function App() {
   const idFromHash = () => {
     const h = (location.hash || '').replace('#/', '');
-    return h === 'glossary' || DEMOS.some((d) => d.id === h) ? h : DEMOS[0].id;
+    return h === 'glossary' || h === 'cheatsheet' || DEMOS.some((d) => d.id === h) ? h : DEMOS[0].id;
   };
   const [activeId, setActiveId] = useState(idFromHash);
   const [filter, setFilter] = useState('');
@@ -2743,7 +2872,7 @@ function App() {
 
   // Progress: remember every lesson the learner has opened.
   useEffect(() => {
-    if (activeId !== 'glossary' && !seen.includes(activeId)) {
+    if (activeId !== 'glossary' && activeId !== 'cheatsheet' && !seen.includes(activeId)) {
       const next = [...seen, activeId];
       setSeen(next);
       store.set('reactive-seen', next);
@@ -2808,6 +2937,11 @@ function App() {
             <Icon name="book" size={15} />
             <span>Glossary</span>
           </button>
+          <button onClick={() => go('cheatsheet')}
+            className={`flex w-full items-center gap-3 px-5 py-2.5 text-left text-sm font-semibold transition ${activeId === 'cheatsheet' ? 'bg-purple-500/15 text-white shadow-[inset_3px_0_0_#a78bfa]' : 'text-purple-300 hover:bg-slate-800/60'}`}>
+            <Icon name="check" size={15} />
+            <span>Cheat sheet</span>
+          </button>
           {CATS.map((cat, ci) => {
             const items = DEMOS.filter((d) => d.cat === cat && matches(d));
             if (!items.length) return null;
@@ -2828,7 +2962,7 @@ function App() {
         </nav>
       </aside>
       <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
-        {activeId === 'glossary' ? <Glossary /> : <DemoView key={activeId} demo={demo} />}
+        {activeId === 'glossary' ? <Glossary /> : activeId === 'cheatsheet' ? <CheatSheet /> : <DemoView key={activeId} demo={demo} />}
       </main>
     </div>
   );
