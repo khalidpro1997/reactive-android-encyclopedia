@@ -852,6 +852,59 @@ LaunchedEffect(listState) {
 // Demo-specific fields set once, after definition.
 DEMOS.forEach((d) => { if (!d.outColor) d.outColor = OUT; });
 
+// Concrete Android scenario per demo: screen name, phone labels and the real-world use case.
+const SCENES = {
+  combine: { title: 'Sign-in screen', subtitle: 'Enable button when form is valid', inputs: ['Username', 'Password'], listLabel: 'Sign-in button state',
+    useCase: 'Login screen: the Sign In button turns on only when BOTH the username (3+ chars) and the password (8+ chars) are valid, whichever field the user typed in last.' },
+  zip: { title: 'Photo upload', subtitle: 'Pair each photo with its thumbnail', inputs: ['Photo picked', 'Thumbnail ready'], listLabel: 'Upload cards',
+    useCase: 'Photo upload: each picked photo waits for its server-made thumbnail, then the two are shown together on one card.' },
+  merge: { title: 'Chat inbox', subtitle: 'Local DB + push on one list', inputs: ['Local DB change', 'Push notification'], listLabel: 'Inbox list',
+    useCase: 'Chat inbox: a message can arrive from the local database (you sent one) or from a push notification. Both feed the same list.' },
+  transform: { title: 'Cart total', subtitle: 'Total = price × quantity', inputs: ['Item price', 'Quantity'], listLabel: 'Total shown',
+    useCase: 'Shopping cart: the total label updates by itself when the price or the quantity changes, with no manual listeners to add or remove.' },
+  map: { title: 'Product list', subtitle: 'Cents to $ labels', inputs: ['Price in cents'], listLabel: 'Price labels',
+    useCase: 'Product list: the API returns 1999 cents and the screen shows $19.99. map does the conversion before the UI binds the value.' },
+  filter: { title: 'Search bar', subtitle: 'Skip requests for short text', inputs: ['Typed text'], listLabel: 'Requests sent',
+    useCase: 'Search bar: do not call the API until the user has typed at least 4 characters.' },
+  distinct: { title: 'Product screen spinner', subtitle: 'Redraw only on real change', inputs: ['Repository state'], listLabel: 'States rendered',
+    useCase: 'Product screen: the repository emits Loading, then Loading again after a cache hit. distinctUntilChanged stops the spinner being redrawn.' },
+  scan: { title: 'Cart badge', subtitle: 'Running subtotal in toolbar', inputs: ['Item added (€)'], listLabel: 'Badge total',
+    useCase: 'Cart badge in the toolbar: each item added adds its price to a running subtotal, shown next to the cart icon.' },
+  debounce: { title: 'Search autocomplete', subtitle: 'Wait 1 s after typing stops', inputs: ['Search box'], listLabel: 'Suggestions shown',
+    useCase: 'Search autocomplete: the API is called 1 second after the user stops typing, not on every keystroke.' },
+  flatmap: { title: 'Search results', subtitle: 'Cancel the old search', inputs: ['Query'], listLabel: 'Results shown',
+    useCase: 'Search results: the user types “Kot”, then “Kotlin”. The request for “Kot” is cancelled, so a slow old response cannot overwrite the new results.' },
+  conflate: { title: 'Live stock price', subtitle: 'Show only the newest price', inputs: ['Price feed'], listLabel: 'Prices drawn',
+    useCase: 'Stock ticker: prices arrive every 250 ms, but the screen can only redraw about every 900 ms, so it draws only the newest price.' },
+  flows: { title: 'Checkout screen', subtitle: 'Sticky state vs one-time toast', inputs: ['ViewModel emit'], listLabel: 'Collector received',
+    useCase: 'Checkout: the loading state is sticky (StateFlow), so a rotated screen shows it again. The “Order placed” toast is a one-time event (SharedFlow), so it is not shown again after rotation.' },
+  sample: { title: 'Step counter', subtitle: 'Chart refresh once per second', inputs: ['Accelerometer'], listLabel: 'Chart updates',
+    useCase: 'Step counter: the accelerometer fires about 50 times a second, but the chart refreshes once a second with the latest reading.' },
+  timeout: { title: 'Orders screen', subtitle: 'Error if the server is silent', inputs: ['Server response'], listLabel: 'Screen states',
+    useCase: 'Orders screen: if the server does not answer within 1.5 s, show “Timeout, tap to retry” instead of an endless spinner.' },
+  take: { title: 'Top 3 nearby stores', subtitle: 'Stop after 3 results', inputs: ['Store result'], listLabel: 'Stores shown',
+    useCase: 'Home screen “Top 3 nearby stores”: stop collecting after 3 results, which cancels the rest of the network stream.' },
+  catch: { title: 'Contacts screen', subtitle: 'Fallback to cached data', inputs: ['Network fetch'], listLabel: 'Contacts shown',
+    useCase: 'Contacts screen: if the network call fails, catch emits the cached contacts instead of showing an empty screen.' },
+  room: { title: 'Contacts list', subtitle: 'Room Flow updates the list', inputs: ['Contact write'], listLabel: 'Contact count',
+    useCase: 'Contacts list: when a background sync inserts a contact into Room, the list updates by itself, with no refresh button.' },
+  snapshot: { title: 'Infinite feed', subtitle: 'Load next page near the bottom', inputs: ['First visible item'], listLabel: 'Page requests',
+    useCase: 'Infinite feed: when the user scrolls to within 8 items of the end, request the next page once, not on every pixel of scroll.' },
+  retry: { title: 'Orders on weak Wi-Fi', subtitle: 'Retry twice, then show error', inputs: ['API attempt'], listLabel: 'Screen state',
+    useCase: 'Orders screen on weak Wi-Fi: retry the request twice before showing “Couldn’t load orders”.' },
+  flatmerge: { title: 'Photo grid', subtitle: 'Load 2 thumbnails at a time', inputs: ['Thumbnail request'], listLabel: 'Thumbnails shown',
+    useCase: 'Photo grid: scrolling starts many thumbnail downloads. flatMapMerge(2) runs at most 2 at once, so the network is not flooded.' },
+  buffer: { title: 'Analytics events', subtitle: 'Queue events, never drop', inputs: ['Tap event'], listLabel: 'Events saved',
+    useCase: 'Analytics: the user taps quickly. Each tap is queued and saved in order, even though each disk write takes 900 ms.' },
+  sharein: { title: 'Home + Settings profile', subtitle: 'One request for both screens', inputs: ['Screen opened'], inputTrack: 'sub', listLabel: 'Requests sent',
+    useCase: 'Home and Settings both show the user profile. shareIn makes one network call and shares the result, so opening Settings does not trigger a second request.' },
+};
+DEMOS.forEach((d) => {
+  const s = SCENES[d.id] || {};
+  d.scene = { ...CAT_SCREENS[d.cat], ...s };
+  if (s.useCase) d.useCase = s.useCase;
+});
+
 /* ---------- Timeline rendering ---------- */
 function buildRows(demo, events, res) {
   const rows = demo.tracks.map((tr) => ({
@@ -1160,8 +1213,10 @@ function DemoView({ demo }) {
 
 /* ---------- Phone mockup: the Android screen this stream would drive ---------- */
 function PhoneScreen({ demo, events, res, now }) {
-  const screen = CAT_SCREENS[demo.cat];
-  const inputTracks = demo.tracks.length ? demo.tracks : [{ id: 'a', label: screen.inputs[0] }];
+  const screen = demo.scene;
+  const inputTracks = demo.tracks.length
+    ? demo.tracks.map((tr, i) => ({ id: tr.id, label: screen.inputs[i] || tr.label }))
+    : [{ id: screen.inputTrack || 'a', label: screen.inputs[0] }];
   const inputs = inputTracks.map((tr) => ({ label: tr.label, value: lastVal(events, tr.id, now) }));
   const rows = demo.kind === 'flows' ? (res.sf.rows[res.sf.rows.length - 1] || { items: [] }).items : (res.out || []);
   const list = rows.filter((i) => i.t <= now).slice(-4).reverse();
