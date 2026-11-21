@@ -900,7 +900,7 @@ LaunchedEffect(listState) {
   {
     id: 'coldflow', cat: CATS[7], icon: 'timer', title: 'flow { } (cold)',
     sub: 'Nothing runs until someone collects. Each collector starts its own run.',
-    explain: 'A flow { } block is cold: the producer runs once per collector. Collector A and Collector B each emit their own sequence, so the work is duplicated. shareIn fixes that.',
+    explain: 'Think of a cold flow like ordering food. Nothing is cooked until someone orders, and every order cooks its own meal. Here, screen A starts the flow and gets its own numbers (A1, A2, …). When screen B starts later, the flow runs again from the beginning just for B (B1, B2, …). So the database query ran twice. shareIn fixes this by running the flow once and sharing the results.',
     tracks: [{ id: 'sub', label: 'collect()' }], outLabel: 'emits', outColor: OUT,
     script: [{ t: 400, track: 'sub', v: 'A' }, { t: 2600, track: 'sub', v: 'B' }],
     buttons: [{ label: 'Collector C joins', track: 'sub', v: 'C' }],
@@ -1233,6 +1233,40 @@ const SCENES = {
   combinetransform: { title: 'Order summary', subtitle: 'Show only valid orders', inputs: ['Price', 'Quantity'], listLabel: 'Summaries shown',
     useCase: 'Order summary: show a summary only when price × quantity reaches the minimum order of 10; any other combination emits nothing.' },
 };
+// Plain-language explanation (everyday comparison) for each demo.
+const SIMPLE = {
+  combine: 'Like two friends texting you. Each time either one sends a message, you look at the other friend’s last message and reply to both together.',
+  zip: 'Like dance partners. You only get a pair when one from the left and one from the right are both ready. The first left goes with the first right.',
+  merge: 'Like two TV channels going into one screen. Whatever shows up first goes on the screen, no matter which channel it came from.',
+  transform: 'Like a spreadsheet cell: total = price × quantity. Change either cell and the total updates by itself.',
+  map: 'Like a machine on a conveyor belt: every item goes in and comes out changed, one for one.',
+  filter: 'Like a bouncer at the door: only items that pass the check get in. The others are stopped.',
+  distinct: 'Like a teacher who only writes the homework when the answer changes. Same answer twice in a row? Skip it.',
+  scan: 'Like a running total on a receipt: each new price is added to what was already there.',
+  debounce: 'Like waiting for someone to finish their sentence before you reply. If they keep talking, you keep waiting.',
+  flatmap: 'Like a waiter who cancels your old order when you change your mind, so only the newest order is brought to you.',
+  conflate: 'Like a news ticker that shows only the newest headline. If new ones arrive while you are reading, the old ones are skipped.',
+  flows: 'StateFlow is like a whiteboard: anyone who walks in sees the latest message. SharedFlow is like a radio announcement: if you are not listening at that moment, you miss it.',
+  sample: 'Like taking a photo every second. You do not see every moment, only the latest snapshot each second.',
+  timeout: 'Like a kitchen timer: if the food is not ready in time, you stop waiting and tell the customer something went wrong.',
+  take: 'Like a quota: you only need 3 results, so once you have them you stop looking.',
+  catch: 'Like a safety net: if something falls, you catch it and put a backup item in its place.',
+  room: 'Like a shared notebook that tells you whenever someone writes in it, so you always see the current page.',
+  snapshot: 'Like an elevator: when you get close to the bottom of the list, it brings the next page up for you.',
+  retry: 'Like calling a friend who does not answer: you try again a couple of times, then give up and tell someone.',
+  flatmerge: 'Like a checkout with 2 cashiers: two customers are served at once, and the rest wait in line.',
+  buffer: 'Like a mailbox: letters pile up while you are busy, and you read them all later, in order.',
+  sharein: 'Like one pizza shared by a group: it is made once, and everyone gets a slice instead of ordering their own.',
+  callbackflow: 'Like a doorbell: it rings whenever someone arrives. When you leave the house, you unplug it.',
+  coldflow: 'Like ordering food: nothing is cooked until someone orders, and every order cooks its own meal.',
+  oncompletion: 'Like cleaning the kitchen after cooking: whether the meal was great or burnt, you still clean up at the end.',
+  retrywhen: 'Like calling back: wait 1 minute and try again. If it is still busy, wait 2 minutes, then give up.',
+  channel: 'Like a conveyor belt with room for only 2 boxes. When it is full, the packer waits until a box is taken off.',
+  workers: 'Like two bank tellers sharing one line. Each customer goes to whichever teller is free first.',
+  concat: 'Like a single checkout line: each person is served only after the one in front is finished.',
+  combinetransform: 'Like a bouncer who checks two tickets: he lets the group in only if the combined rule passes, and he decides what to announce.',
+};
+
 // Which kind of Android screen the phone shows for each demo.
 const MOCK = {
   combine: { type: 'form', cta: 'Sign In' }, zip: { type: 'list' }, merge: { type: 'list' }, transform: { type: 'badge' },
@@ -1248,6 +1282,7 @@ DEMOS.forEach((d) => {
   const s = SCENES[d.id] || {};
   d.scene = { ...CAT_SCREENS[d.cat], ...s, ...(MOCK[d.id] || { type: 'list' }) };
   if (s.useCase) d.useCase = s.useCase;
+  d.simple = SIMPLE[d.id] || '';
 });
 
 /* ---------- Timeline rendering ---------- */
@@ -1458,7 +1493,16 @@ function DemoView({ demo }) {
         <div className="font-mono text-[11px] uppercase tracking-widest text-purple-300">{demo.cat}</div>
         <h1 className="mt-1 font-mono text-2xl font-bold text-white sm:text-3xl">{demo.title}</h1>
         <p className="mt-1 text-slate-400">{demo.sub}</p>
-        <p className="mt-3 text-sm leading-relaxed text-slate-300">{demo.explain}</p>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-300">In plain words</div>
+            <p className="text-sm leading-relaxed text-slate-200">{demo.simple}</p>
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-purple-300">How it works</div>
+            <p className="text-sm leading-relaxed text-slate-300">{demo.explain}</p>
+          </div>
+        </div>
       </header>
 
       {/* transport */}
