@@ -34,7 +34,7 @@ const TC = { a: '#22d3ee', b: '#fb923c' };   // track A = cyan, track B = orange
 const OUT = '#a78bfa';       // output / purple
 const GOOD = '#34d399';
 const REPLAY = '#facc15';
-const CATS = ['Combining & Merging', 'Transforming & Filtering', 'Async, Search & Timing', 'Hot vs. Cold Streams', 'Operators You Will Use Next', 'Android Libraries in Practice', 'Concurrency, Retry & Sharing', 'Flow Creation', 'Completion & Errors', 'Channels & Producers', 'Advanced Combining'];
+const CATS = ['Combining & Merging', 'Transforming & Filtering', 'Async, Search & Timing', 'Hot vs. Cold Streams', 'Operators You Will Use Next', 'Android Libraries in Practice', 'Concurrency, Retry & Sharing', 'Flow Creation', 'Completion & Errors', 'Channels & Producers', 'Advanced Combining', 'Threads & State'];
 
 // The Android screen shown in the phone mockup for each category.
 const CAT_SCREENS = {
@@ -49,6 +49,7 @@ const CAT_SCREENS = {
   [CATS[8]]: { title: 'Sync & downloads', subtitle: 'Cleanup, retries & failures', icon: 'shield', accent: '#f87171', inputs: ['Event'], listLabel: 'Results' },
   [CATS[9]]: { title: 'Upload queue', subtitle: 'Buffers & worker pools', icon: 'inbox', accent: '#2dd4bf', inputs: ['Item'], listLabel: 'Received' },
   [CATS[10]]: { title: 'Order screen', subtitle: 'Order, parallelism & rules', icon: 'shuffle', accent: '#c084fc', inputs: ['Input'], listLabel: 'Output' },
+  [CATS[11]]: { title: 'Reader & ViewModel', subtitle: 'Threads, state & loading', icon: 'activity', accent: '#a3e635', inputs: ['Input'], listLabel: 'Screen output' },
 };
 
 /* ---------- Lucide icon geometry (inlined, no CDN) ---------- */
@@ -1165,6 +1166,118 @@ repeat(2) {
       why: 'Inside combineTransform you call emit() yourself, so you decide whether and how many values to send.',
     },
   },
+
+  /* ---- 12. Threads & State ---- */
+  {
+    id: 'flowon', cat: CATS[11], icon: 'layers', title: 'flowOn(Dispatchers.IO)',
+    sub: 'Moves the slow work above it to a background thread, while the collector stays on the UI thread.',
+    explain: 'The producer runs on Dispatchers.IO, so each green bar is slow work in the background (500 ms). When a page is ready, it is delivered to the collector on Main. The UI never waits for the bars.',
+    tracks: [{ id: 'a', label: 'Load requests' }], outLabel: 'UI receives', outColor: OUT,
+    script: [{ t: 400, track: 'a', v: 'p1' }, { t: 900, track: 'a', v: 'p2' }, { t: 2000, track: 'a', v: 'p3' }],
+    buttons: [{ label: 'Load page', track: 'a', v: 'p' }],
+    compute: (evs) => {
+      const S = sorted(evs).filter((e) => e.track === 'a');
+      let freeAt = 0;
+      const out = [], bars = [];
+      S.forEach((e) => {
+        const start = Math.max(e.t, freeAt);
+        const end = start + 500;
+        freeAt = end;
+        bars.push({ id: 'io' + e.id, start, end, label: `IO: ${e.v}`, color: GOOD });
+        out.push({ id: 'o' + e.id, t: end, v: `${e.v} on Main` });
+      });
+      return { out, bars };
+    },
+    useCase: 'Reading a big file or a long database query: do the slow work on IO, then update the screen on Main, without freezing the UI.',
+    code: `fun loadPages(): Flow<Page> = flow {
+    emit(parseBigFile())          // slow work, runs in this block
+}
+    .flowOn(Dispatchers.IO)       // everything ABOVE this line runs on IO
+
+// The collector in the ViewModel stays on Dispatchers.Main
+viewModelScope.launch { loadPages().collect { page -> _ui.value = page } }`,
+    xml: 'Classic equivalent: doing the file parsing in AsyncTask.doInBackground() and updating the views in onPostExecute(), or using an Executor with a Handler for the UI update.',
+    quiz: {
+      q: 'Where does flowOn(Dispatchers.IO) apply?',
+      options: ['Only to the collector', 'To the code above it (upstream), not to the collector', 'To the whole app'],
+      answer: 1,
+      why: 'flowOn changes the dispatcher for everything before it. The collector keeps its own dispatcher, usually Main.',
+    },
+  },
+  {
+    id: 'statein', cat: CATS[11], icon: 'activity', title: 'stateIn + SharingStarted',
+    sub: 'Turns a cold Flow into a StateFlow for a ViewModel. SharingStarted decides when the work runs.',
+    explain: 'With WhileSubscribed(5000), the upstream starts when the first screen collects. When the last collector leaves, it keeps running for 5 more seconds. If a collector returns within that time (like after a rotation), nothing restarts. Otherwise the upstream stops.',
+    tracks: [{ id: 'sub', label: 'UI collectors' }], outLabel: 'upstream ticks', outColor: OUT,
+    script: [{ t: 400, track: 'sub', v: 'join' }, { t: 1500, track: 'sub', v: 'leave' }, { t: 9000, track: 'sub', v: 'join' }, { t: 9500, track: 'sub', v: 'leave' }],
+    buttons: [
+      { label: 'Screen joins', track: 'sub', v: 'join' },
+      { label: 'Screen leaves', track: 'sub', v: 'leave' },
+    ],
+    compute: (evs, now) => {
+      const S = sorted(evs).filter((e) => e.track === 'sub');
+      const iv = [];
+      let cur = null, count = 0;
+      S.forEach((e) => {
+        if (e.v === 'join') {
+          if (!cur || (cur.end !== undefined && cur.end <= e.t)) { cur = { s: e.t, end: undefined }; iv.push(cur); }
+          else cur.end = undefined;
+          count += 1;
+        } else {
+          count -= 1;
+          if (count === 0 && cur) cur.end = e.t + 5000;
+        }
+      });
+      const out = [], bars = [];
+      iv.forEach((x, idx) => {
+        const until = Math.min(x.end !== undefined ? x.end : now, now);
+        bars.push({ id: 'run' + idx, start: x.s, end: x.end !== undefined ? x.end : Math.max(now, x.s) + 1000, label: x.end !== undefined ? 'running (5 s grace)' : 'running', color: GOOD });
+        for (let k = 1; x.s + k * 1000 <= until; k++) out.push({ id: `u${idx}k${k}`, t: x.s + k * 1000, v: `#${k}` });
+      });
+      return { out, bars };
+    },
+    useCase: 'Orders screen in a ViewModel: rotating the phone should not reload the orders, but leaving the screen for a long time should stop the work.',
+    code: `val orders: StateFlow<List<Order>> = repository.observeOrders()
+    .stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),   // keep alive 5 s after the last collector
+        initialValue = emptyList()
+    )`,
+    xml: 'Classic equivalent: a LiveData in the ViewModel that survives rotation, plus a flag so the screen does not reload its data when the Activity is recreated.',
+    quiz: {
+      q: 'With WhileSubscribed(5000), the last collector leaves for a rotation and returns 2 seconds later. What happens?',
+      options: ['The upstream restarts from zero', 'The upstream keeps running, nothing restarts', 'The app crashes'],
+      answer: 1,
+      why: 'The 5-second grace period keeps the upstream alive, so the StateFlow keeps its value and does not reload.',
+    },
+  },
+  {
+    id: 'onstart', cat: CATS[11], icon: 'gitmerge', title: 'onStart',
+    sub: 'Emits a first value (like Loading) as soon as collection starts, before any real data arrives.',
+    explain: 'onStart runs when collection begins. Here it emits “Loading…” at time 0, then each server item follows. onEmpty works the same way, but only fires when the upstream finishes with no values at all.',
+    tracks: [{ id: 'a', label: 'Server' }], outLabel: 'UI state', outColor: OUT,
+    script: [{ t: 1800, track: 'a', v: 1 }, { t: 2900, track: 'a', v: 2 }],
+    buttons: [{ label: 'Server sends item', track: 'a', v: '#' }],
+    compute: (evs) => {
+      const S = sorted(evs).filter((e) => e.track === 'a');
+      const out = [{ id: 'loading', t: 0, v: 'Loading…', color: '#facc15' }];
+      S.forEach((e) => out.push({ id: 'o' + e.id, t: e.t, v: `item ${e.v}`, color: GOOD }));
+      return { out };
+    },
+    useCase: 'Screen opens: show a spinner right away, then replace it with the list when the server responds.',
+    code: `repository.observeItems()
+    .map { UiState.Success(it) as UiState }
+    .onStart { emit(UiState.Loading) }     // shown as soon as the screen starts collecting
+    .catch { emit(UiState.Error(it)) }
+    .collect { state -> render(state) }`,
+    xml: 'Classic equivalent: set the progress bar to visible in onCreate() before starting the network call, then hide it in the callback.',
+    quiz: {
+      q: 'What does onStart { emit(Loading) } do?',
+      options: ['Emits Loading after the data arrives', 'Emits Loading as soon as collection starts, before any upstream value', 'Cancels the flow'],
+      answer: 1,
+      why: 'onStart runs at the beginning of collection, so the UI can show the loading state immediately.',
+    },
+  },
 ];
 
 // Demo-specific fields set once, after definition.
@@ -1232,6 +1345,12 @@ const SCENES = {
     useCase: 'Draft autosave: each edit is saved after the previous one, so the server never receives them out of order.' },
   combinetransform: { title: 'Order summary', subtitle: 'Show only valid orders', inputs: ['Price', 'Quantity'], listLabel: 'Summaries shown',
     useCase: 'Order summary: show a summary only when price × quantity reaches the minimum order of 10; any other combination emits nothing.' },
+  flowon: { title: 'Reading a big file', subtitle: 'Slow work off the UI thread', inputs: ['Page request'], listLabel: 'Pages shown',
+    useCase: 'Reading a big file or a long database query: do the slow work on IO, then update the screen on Main, without freezing the UI.' },
+  statein: { title: 'Orders screen', subtitle: 'Survives rotation, stops when idle', inputs: ['UI collector'], inputTrack: 'sub', listLabel: 'Latest orders',
+    useCase: 'Orders screen in a ViewModel: rotating the phone should not reload the orders, but leaving the screen for a long time should stop the work.' },
+  onstart: { title: 'Items screen', subtitle: 'Spinner first, then the list', inputs: ['Server item'], listLabel: 'Screen states',
+    useCase: 'Screen opens: show a spinner right away, then replace it with the list when the server responds.' },
 };
 // Plain-language explanation (everyday comparison) for each demo.
 const SIMPLE = {
@@ -1265,6 +1384,9 @@ const SIMPLE = {
   workers: 'Like two bank tellers sharing one line. Each customer goes to whichever teller is free first.',
   concat: 'Like a single checkout line: each person is served only after the one in front is finished.',
   combinetransform: 'Like a bouncer who checks two tickets: he lets the group in only if the combined rule passes, and he decides what to announce.',
+  flowon: 'Like a cook in the kitchen and a waiter in the dining room. The cooking happens in the kitchen (IO), and the waiter brings the food to the table (Main), so the dining room never waits.',
+  statein: 'Like a coffee machine that stays warm for a few minutes after the last cup. If someone comes back quickly, it does not heat up again. If nobody comes back, it turns off.',
+  onstart: 'Like a restaurant that shows a “your food is coming” sign the moment you sit down, before the food arrives.',
 };
 
 // Which kind of Android screen the phone shows for each demo.
@@ -1277,6 +1399,7 @@ const MOCK = {
   buffer: { type: 'list' }, sharein: { type: 'states' },
   callbackflow: { type: 'list' }, coldflow: { type: 'feed' }, oncompletion: { type: 'states' }, retrywhen: { type: 'states' },
   channel: { type: 'list' }, workers: { type: 'grid' }, concat: { type: 'list' }, combinetransform: { type: 'form', cta: 'Save order' },
+  flowon: { type: 'list' }, statein: { type: 'ticker' }, onstart: { type: 'states' },
 };
 DEMOS.forEach((d) => {
   const s = SCENES[d.id] || {};
@@ -1799,6 +1922,65 @@ function Quiz({ quiz }) {
   );
 }
 
+/* ---------- Glossary ---------- */
+const GLOSSARY = [
+  { term: 'emit', def: 'Send one value out of a flow. Inside flow { }, emit(x) hands x to the collector right now.', example: 'flow { emit(1); emit(2) }   // collector receives 1, then 2' },
+  { term: 'collect', def: 'Start listening to a flow and run your code for each value. Nothing happens until someone collects.', example: 'myFlow.collect { value -> println(value) }' },
+  { term: 'collector', def: 'The code that receives the values (the lambda in collect). Each collector gets its own run of a cold flow.' },
+  { term: 'omit (no such word in Flow)', def: 'Flow has no “omit” function. The words you probably need: filter (keep only values that pass a test), drop(n) (skip the first n values), takeWhile (stop at the first value that fails).', example: 'flow.filter { it > 0 }\nflow.drop(2)\nflow.takeWhile { it < 10 }' },
+  { term: 'Flow', def: 'A stream of values produced over time, one after another. Flow<Int> means “a stream of Int values”.' },
+  { term: 'cold flow', def: 'Does nothing until collected, and runs again for every collector. Example: flow { }, a Room query, a Retrofit call wrapped in a flow.' },
+  { term: 'hot flow', def: 'Already running. Collectors only receive what happens while they listen. Examples: StateFlow, SharedFlow.' },
+  { term: 'operator', def: 'A function that changes a flow: map, filter, debounce, combine and so on. It returns a new flow.' },
+  { term: 'upstream / downstream', def: 'Upstream is everything before an operator (where values come from). Downstream is everything after it (where values go).' },
+  { term: 'suspend', def: 'A function that can pause without blocking its thread, marked with the suspend keyword. Flow code runs inside suspend functions.' },
+  { term: 'coroutine', def: 'A lightweight task that can pause and resume. Flows are collected inside coroutines.' },
+  { term: 'dispatcher', def: 'Which thread a coroutine runs on: Dispatchers.Main (UI), Dispatchers.IO (disk and network), Dispatchers.Default (heavy CPU work).' },
+  { term: 'scope', def: 'The lifetime of coroutines. viewModelScope is cancelled when the ViewModel is cleared, so its work stops too.' },
+  { term: 'cancellation', def: 'Stopping work early. When the collector leaves, the flow stops emitting and its cleanup code (onCompletion, awaitClose) runs.' },
+  { term: 'backpressure', def: 'When the collector is slow, the producer waits (suspends) instead of sending values faster than they can be handled.' },
+  { term: 'StateFlow', def: 'A hot flow that always holds one current value. A new collector gets the latest value straight away. Equal values are ignored.' },
+  { term: 'SharedFlow', def: 'A hot flow for events. With replay = 0 it has no memory: a collector only receives values sent while it is listening.' },
+  { term: 'stateIn / shareIn', def: 'Turn a cold flow into a hot one (StateFlow or SharedFlow) that is shared between collectors, so the work runs once.' },
+  { term: 'SharingStarted', def: 'Decides when shared work starts and stops. WhileSubscribed(5000) keeps it alive for 5 s after the last collector leaves.' },
+  { term: 'replay', def: 'Giving a new collector values from the past. StateFlow replays its current value; SharedFlow replays only as many values as you set.' },
+  { term: 'channel', def: 'A queue between a sender and a receiver. send() suspends when the queue is full. receive() suspends when it is empty.', example: 'val c = Channel<Int>(capacity = 2)' },
+  { term: 'conflate', def: 'Keep only the newest value while the collector is busy. The older ones are dropped.' },
+  { term: 'buffer', def: 'Keep every value in a queue so the producer can run ahead. Nothing is dropped.' },
+  { term: 'debounce / sample', def: 'debounce waits for a pause in the values and emits the last one. sample takes the latest value every fixed time interval.' },
+  { term: 'completion', def: 'The flow ends (no more values). onCompletion runs at the end, whether it succeeded, failed or was cancelled.' },
+  { term: 'exception', def: 'An error thrown inside a flow. catch handles it upstream; without catch or retry, the flow ends with the error.' },
+  { term: 'retry', def: 'Run the upstream again after an error. retry(2) allows two extra attempts.' },
+  { term: 'launch / launchIn', def: 'launch starts a new coroutine. launchIn(scope) starts collecting a flow inside that scope.' },
+  { term: 'marble diagram', def: 'The timeline drawing used on this site: each circle is a value, the horizontal line is time, and ✕ means cancelled, blocked or an error.' },
+];
+
+function Glossary() {
+  const [q, setQ] = useState('');
+  const items = GLOSSARY.filter((g) => (g.term + ' ' + g.def).toLowerCase().includes(q.toLowerCase()));
+  return (
+    <div className="mx-auto max-w-3xl space-y-6">
+      <header>
+        <div className="font-mono text-[11px] uppercase tracking-widest text-purple-300">Reference</div>
+        <h1 className="mt-1 font-mono text-2xl font-bold text-white sm:text-3xl">Glossary</h1>
+        <p className="mt-1 text-slate-400">Words that often confuse people learning Flow, in plain language.</p>
+      </header>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a word…"
+        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+      <div className="space-y-3">
+        {items.map((g) => (
+          <div key={g.term} className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+            <div className="font-mono text-base font-semibold text-white">{g.term}</div>
+            <p className="mt-1 text-sm leading-relaxed text-slate-300">{g.def}</p>
+            {g.example && <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-950 p-3 font-mono text-[12px] leading-relaxed text-slate-200">{g.example}</pre>}
+          </div>
+        ))}
+        {items.length === 0 && <p className="text-sm text-slate-500">No match. Try another word.</p>}
+      </div>
+    </div>
+  );
+}
+
 /* ---------- App shell ---------- */
 function App() {
   const [activeId, setActiveId] = useState(DEMOS[0].id);
@@ -1816,6 +1998,11 @@ function App() {
           </div>
         </div>
         <nav className="pb-4">
+          <button onClick={() => setActiveId('glossary')}
+            className={`flex w-full items-center gap-3 px-5 py-2.5 text-left text-sm font-semibold transition ${activeId === 'glossary' ? 'bg-purple-500/15 text-white shadow-[inset_3px_0_0_#a78bfa]' : 'text-purple-300 hover:bg-slate-800/60'}`}>
+            <Icon name="book" size={15} />
+            <span>Glossary</span>
+          </button>
           {CATS.map((cat, ci) => (
             <div key={cat}>
               <div className="px-5 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-widest text-slate-500">{ci + 1} · {cat}</div>
@@ -1831,7 +2018,7 @@ function App() {
         </nav>
       </aside>
       <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
-        <DemoView key={activeId} demo={demo} />
+        {activeId === 'glossary' ? <Glossary /> : <DemoView key={activeId} demo={demo} />}
       </main>
     </div>
   );
