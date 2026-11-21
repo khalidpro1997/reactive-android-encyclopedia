@@ -34,7 +34,7 @@ const TC = { a: '#22d3ee', b: '#fb923c' };   // track A = cyan, track B = orange
 const OUT = '#a78bfa';       // output / purple
 const GOOD = '#34d399';
 const REPLAY = '#facc15';
-const CATS = ['Combining & Merging', 'Transforming & Filtering', 'Async, Search & Timing', 'Hot vs. Cold Streams', 'Operators You Will Use Next', 'Android Libraries in Practice', 'Concurrency, Retry & Sharing'];
+const CATS = ['Combining & Merging', 'Transforming & Filtering', 'Async, Search & Timing', 'Hot vs. Cold Streams', 'Operators You Will Use Next', 'Android Libraries in Practice', 'Concurrency, Retry & Sharing', 'Flow Creation', 'Completion & Errors', 'Channels & Producers', 'Advanced Combining'];
 
 // The Android screen shown in the phone mockup for each category.
 const CAT_SCREENS = {
@@ -45,6 +45,10 @@ const CAT_SCREENS = {
   [CATS[4]]: { title: 'Sensor dashboard', subtitle: 'Sampling, timeouts & limits', icon: 'activity', accent: '#f472b6', inputs: ['Sensor'], listLabel: 'UI updates' },
   [CATS[5]]: { title: 'Contacts', subtitle: 'Room + Compose state', icon: 'database', accent: '#38bdf8', inputs: ['DAO write'], listLabel: 'Visible rows' },
   [CATS[6]]: { title: 'Photo feed', subtitle: 'Parallel loads & retries', icon: 'layers', accent: '#fbbf24', inputs: ['Request'], listLabel: 'Loaded items' },
+  [CATS[7]]: { title: 'Location tracker', subtitle: 'Listeners built as flows', icon: 'radio', accent: '#e879f9', inputs: ['Input'], listLabel: 'Emitted values' },
+  [CATS[8]]: { title: 'Sync & downloads', subtitle: 'Cleanup, retries & failures', icon: 'shield', accent: '#f87171', inputs: ['Event'], listLabel: 'Results' },
+  [CATS[9]]: { title: 'Upload queue', subtitle: 'Buffers & worker pools', icon: 'inbox', accent: '#2dd4bf', inputs: ['Item'], listLabel: 'Received' },
+  [CATS[10]]: { title: 'Order screen', subtitle: 'Order, parallelism & rules', icon: 'shuffle', accent: '#c084fc', inputs: ['Input'], listLabel: 'Output' },
 };
 
 /* ---------- Lucide icon geometry (inlined, no CDN) ---------- */
@@ -847,6 +851,320 @@ LaunchedEffect(listState) {
       why: 'shareIn turns a cold flow into a hot one: a single upstream is shared, and replay controls how many past values late collectors receive.',
     },
   },
+
+  /* ---- 8. Flow Creation ---- */
+  {
+    id: 'callbackflow', cat: CATS[7], icon: 'radio', title: 'callbackFlow',
+    sub: 'Wraps a callback-based listener (location, sensor, Firebase) as a Flow.',
+    explain: 'The listener is registered when collection starts and removed in awaitClose when the collector cancels. The bar shows how long the listener is alive. Callbacks after “stop” are cancelled.',
+    tracks: [{ id: 'a', label: 'Callbacks' }], outLabel: 'listener', outColor: OUT,
+    script: [{ t: 300, track: 'start', v: 'start' }, { t: 900, track: 'a', v: 'fix1' }, { t: 1600, track: 'a', v: 'fix2' }, { t: 2400, track: 'a', v: 'fix3' }, { t: 3000, track: 'stop', v: 'stop' }, { t: 3500, track: 'a', v: 'late' }],
+    buttons: [
+      { label: 'Callback fires', track: 'a', v: 'fix' },
+      { label: 'Collector cancels', track: 'stop', v: 'stop' },
+    ],
+    compute: (evs, now) => {
+      const S = sorted(evs);
+      const start = S.find((e) => e.track === 'start');
+      const stop = S.find((e) => e.track === 'stop' && start && e.t > start.t);
+      const st = {}, out = [], bars = [];
+      if (!start) return { st, out, bars };
+      const stopT = stop ? stop.t : undefined;
+      const end = stopT !== undefined ? stopT : Math.max(now, start.t) + 2000;
+      bars.push({ id: 'listener', start: start.t, end, cancelAt: stopT, label: 'listener registered', color: OUT });
+      S.filter((e) => e.track === 'a').forEach((e) => {
+        if (e.t >= start.t && (stopT === undefined || e.t < stopT)) out.push({ id: 'o' + e.id, t: e.t, v: e.v });
+        else st[e.id] = 'cancelled';
+      });
+      return { st, out, bars };
+    },
+    useCase: 'Live location: a LocationCallback is registered when the screen starts collecting and removed when the collector is cancelled, so GPS is not left running.',
+    code: `fun locationUpdates(): Flow<Location> = callbackFlow {
+    val callback = object : LocationCallback() {
+        override fun onLocationResult(result: LocationResult) {
+            trySend(result.lastLocation)
+        }
+    }
+    fusedClient.requestLocationUpdates(request, callback, Looper.getMainLooper())
+    // Runs when the collector cancels: stop GPS
+    awaitClose { fusedClient.removeLocationUpdates(callback) }
+}`,
+    xml: 'Classic equivalent: register the LocationCallback in onStart() and unregister it in onStop(). callbackFlow ties that cleanup to the collector instead of the Activity lifecycle.',
+    quiz: {
+      q: 'Where do you remove the listener in a callbackFlow?',
+      options: ['In a finally block after collect()', 'In awaitClose { }, which runs when the collector cancels', 'In onCompletion only'],
+      answer: 1,
+      why: 'awaitClose keeps the flow open and runs its block when the collector is cancelled, which is the right moment to unregister the callback.',
+    },
+  },
+  {
+    id: 'coldflow', cat: CATS[7], icon: 'timer', title: 'flow { } (cold)',
+    sub: 'Nothing runs until someone collects. Each collector starts its own run.',
+    explain: 'A flow { } block is cold: the producer runs once per collector. Collector A and Collector B each emit their own sequence, so the work is duplicated. shareIn fixes that.',
+    tracks: [{ id: 'sub', label: 'collect()' }], outLabel: 'emits', outColor: OUT,
+    script: [{ t: 400, track: 'sub', v: 'A' }, { t: 2600, track: 'sub', v: 'B' }],
+    buttons: [{ label: 'Collector C joins', track: 'sub', v: 'C' }],
+    compute: (evs, now) => {
+      const PALETTE = { A: TC.a, B: TC.b, C: '#f472b6' };
+      const cols = sorted(evs).filter((e) => e.track === 'sub');
+      const out = [];
+      cols.forEach((c) => {
+        for (let k = 1; c.t + k * 900 <= now; k++) {
+          out.push({ id: 'c' + c.id + 'k' + k, t: c.t + k * 900, v: `${c.v}${k}`, color: PALETTE[c.v] || OUT });
+        }
+      });
+      return { out };
+    },
+    useCase: 'Orders query in a repository: each screen that collects the Flow runs its own query. Add shareIn if you want one shared run.',
+    code: `fun observeOrders(): Flow<List<Order>> = flow {
+    while (true) {
+        emit(db.loadOrders())   // runs again for EACH collector
+        delay(900)
+    }
+}`,
+    xml: 'Classic equivalent: starting a new Retrofit call in every onResume(). Each caller gets its own request, which is why a shared cache or singleton is used.',
+    quiz: {
+      q: 'Two collectors call collect() on a cold flow { } block. How many times does the producer run?',
+      options: ['Once, shared between them', 'Twice, once per collector', 'Never, until stateIn is used'],
+      answer: 1,
+      why: 'Cold flows run per collector. shareIn or stateIn turns them into a single shared run.',
+    },
+  },
+
+  /* ---- 9. Completion & Errors ---- */
+  {
+    id: 'oncompletion', cat: CATS[8], icon: 'check', title: 'onCompletion',
+    sub: 'Runs once when the flow ends, whether it finished, failed or was cancelled.',
+    explain: 'The DONE value is the upstream finishing. onCompletion runs as a cleanup step and emits a “cleanup” marble. Anything arriving after DONE is cancelled.',
+    tracks: [{ id: 'a', label: 'Chunks' }], outLabel: 'onCompletion', outColor: OUT,
+    script: [{ t: 400, track: 'a', v: 'chunk1' }, { t: 1200, track: 'a', v: 'chunk2' }, { t: 2000, track: 'a', v: 'chunk3' }, { t: 2600, track: 'a', v: 'DONE' }, { t: 3300, track: 'a', v: 'late' }],
+    buttons: [
+      { label: 'Chunk arrives', track: 'a', v: 'chunk' },
+      { label: 'Finish', track: 'a', v: 'DONE' },
+    ],
+    compute: (evs) => {
+      const S = sorted(evs).filter((e) => e.track === 'a');
+      const st = {}, out = [];
+      let done = false;
+      S.forEach((e) => {
+        if (done) { st[e.id] = 'cancelled'; return; }
+        if (e.v === 'DONE') { done = true; out.push({ id: 'c' + e.id, t: e.t, v: 'cleanup ✓', color: GOOD }); }
+        else out.push({ id: 'o' + e.id, t: e.t, v: e.v });
+      });
+      return { st, out };
+    },
+    useCase: 'File download: when the transfer ends (success, error or user cancel), hide the progress bar and close the file, whichever happened.',
+    code: `downloadChunks(url)
+    .onEach { chunk -> file.write(chunk) }
+    .onCompletion { cause ->      // runs on success, error AND cancellation
+        file.close()
+        progress.hide()
+    }
+    .collect()`,
+    xml: 'Classic equivalent: a finally block in your AsyncTask.onPostExecute or Retrofit callback that closes the stream whether the call succeeded or failed.',
+    quiz: {
+      q: 'When does onCompletion run?',
+      options: ['Only when the flow succeeds', 'When the flow finishes, fails, or is cancelled', 'Only when the flow is cancelled'],
+      answer: 1,
+      why: 'onCompletion is the finally of a flow: it runs for every way the flow can end, with the cause (null on success).',
+    },
+  },
+  {
+    id: 'retrywhen', cat: CATS[8], icon: 'rotate', title: 'retryWhen backoff',
+    sub: 'Retries with growing delays: 1 s, then 2 s, then gives up.',
+    explain: 'Each failure schedules the next attempt after a delay that doubles: 1 s, then 2 s. After two retries in a row the error is passed downstream. A success resets the count.',
+    tracks: [{ id: 'a', label: 'Attempts' }], outLabel: 'sync state', outColor: OUT,
+    script: [{ t: 400, track: 'a', v: 'ok' }, { t: 1200, track: 'a', v: 'fail' }, { t: 2200, track: 'a', v: 'fail' }, { t: 4200, track: 'a', v: 'ok' }, { t: 6000, track: 'a', v: 'fail' }],
+    buttons: [
+      { label: 'Attempt ok', track: 'a', v: 'ok' },
+      { label: 'Attempt fail', track: 'a', v: 'fail' },
+    ],
+    compute: (evs) => {
+      const S = sorted(evs).filter((e) => e.track === 'a');
+      const st = {}, out = [], bars = [];
+      let fails = 0, dead = false;
+      S.forEach((e) => {
+        if (dead) { st[e.id] = 'cancelled'; return; }
+        if (e.v === 'fail') {
+          fails += 1;
+          if (fails > 2) { out.push({ id: 'x' + e.id, t: e.t, v: 'Error', color: '#f87171' }); dead = true; return; }
+          const delay = 1000 * Math.pow(2, fails - 1);
+          st[e.id] = 'dropped';
+          bars.push({ id: 'w' + e.id, start: e.t, end: e.t + delay, label: `wait ${delay / 1000}s`, color: '#facc15' });
+        } else {
+          fails = 0;
+          out.push({ id: 'o' + e.id, t: e.t, v: e.v });
+        }
+      });
+      return { st, out, bars };
+    },
+    useCase: 'Sync on mobile data: retry after 1 s, then 2 s, then show “Sync paused” instead of hammering the server every few milliseconds.',
+    code: `api.syncUp()
+    .retryWhen { cause, attempt ->
+        delay(1000L * (1L shl attempt.toInt()))   // 1 s, 2 s, 4 s ...
+        attempt < 3 && cause is IOException       // give up after 3 retries
+    }
+    .catch { emit(SyncResult.Paused) }`,
+    xml: 'Classic equivalent: a WorkManager retry policy with BackoffPolicy.EXPONENTIAL, or a Handler.postDelayed() chain that doubles the delay each time.',
+    quiz: {
+      q: 'What does retryWhen { cause, attempt -> } give you that retry(2) does not?',
+      options: ['Nothing different', 'Control over the delay between attempts, for example exponential backoff', 'Infinite retries only'],
+      answer: 1,
+      why: 'retryWhen runs your own suspend code before each retry, so you can wait, back off, or decide based on the error.',
+    },
+  },
+
+  /* ---- 10. Channels & Producers ---- */
+  {
+    id: 'channel', cat: CATS[9], icon: 'inbox', title: 'Channel(2)',
+    sub: 'A bounded buffer between producer and consumer. When it is full, the sender suspends.',
+    explain: 'Capacity is 2, and the consumer takes one item per second. When two items are waiting, the next send() suspends (grey “suspended” bar) until the consumer takes one.',
+    tracks: [{ id: 'a', label: 'send()' }], outLabel: 'receive()', outColor: OUT,
+    script: Array.from({ length: 6 }, (_, i) => ({ t: 300 + i * 250, track: 'a', v: i + 1 })),
+    buttons: [{ label: 'send() ×3', track: 'a', v: '#', n: 3, gap: 150 }],
+    compute: (evs) => {
+      const S = sorted(evs).filter((e) => e.track === 'a');
+      const CAP = 2, TAKE = 1000;
+      const recv = [], out = [], bars = [];
+      S.forEach((e, i) => {
+        const roomAt = i >= CAP ? recv[i - CAP] : 0;
+        const sendAt = Math.max(e.t, roomAt);
+        const prev = i > 0 ? recv[i - 1] : -TAKE;
+        const r = Math.max(sendAt, prev + TAKE);
+        recv.push(r);
+        if (sendAt > e.t) bars.push({ id: 's' + e.id, start: e.t, end: sendAt, label: 'suspended', color: '#64748b' });
+        out.push({ id: 'o' + e.id, t: r, v: e.v });
+      });
+      return { out, bars };
+    },
+    useCase: 'Upload queue: the camera takes photos faster than they can be uploaded. A bounded Channel(2) makes the camera wait, instead of holding every photo in memory.',
+    code: `private val uploads = Channel<Photo>(capacity = 2)
+
+fun onPhotoTaken(photo: Photo) = viewModelScope.launch {
+    uploads.send(photo)            // suspends while 2 photos are already waiting
+}
+
+init {
+    viewModelScope.launch {
+        for (photo in uploads) upload(photo)   // one at a time
+    }
+}`,
+    xml: 'Classic equivalent: a bounded BlockingQueue (ArrayBlockingQueue(2)) where put() blocks the producer thread when the queue is full.',
+    quiz: {
+      q: 'A Channel(2) is full and the producer calls send(). What happens?',
+      options: ['send() throws an exception', 'send() suspends until the consumer receives one item', 'The oldest item is dropped'],
+      answer: 1,
+      why: 'send() is a suspend function: it waits for space, so the producer applies backpressure instead of losing data.',
+    },
+  },
+  {
+    id: 'workers', cat: CATS[9], icon: 'layers', title: 'Worker pool (2)',
+    sub: 'Fan-out: several workers share one queue, so jobs run in parallel.',
+    explain: 'Two workers each take one job at a time, and each job needs 1.5 s. A new job goes to whichever worker is free first, like a bank with two tellers. A third job waits.',
+    tracks: [{ id: 'a', label: 'Jobs' }], outLabel: 'done', outColor: OUT,
+    script: [{ t: 300, track: 'a', v: 'J1' }, { t: 500, track: 'a', v: 'J2' }, { t: 700, track: 'a', v: 'J3' }, { t: 900, track: 'a', v: 'J4' }, { t: 2600, track: 'a', v: 'J5' }],
+    buttons: [{ label: 'New job J6', track: 'a', v: 'J6' }],
+    compute: (evs) => {
+      const S = sorted(evs).filter((e) => e.track === 'a');
+      const free = [0, 0];
+      const out = [], bars = [];
+      S.forEach((e) => {
+        const k = free[0] <= free[1] ? 0 : 1;
+        const start = Math.max(e.t, free[k]);
+        const end = start + 1500;
+        free[k] = end;
+        if (start > e.t) bars.push({ id: 'q' + e.id, start: e.t, end: start, label: `${e.v} waits`, color: '#64748b' });
+        bars.push({ id: 'w' + e.id, start, end, label: `worker ${k + 1}: ${e.v}`, color: k === 0 ? TC.a : TC.b });
+        out.push({ id: 'o' + e.id, t: end, v: `${e.v} ✓` });
+      });
+      return { out, bars };
+    },
+    useCase: 'Photo export: a pool of 2 workers processes export jobs in parallel from one shared queue, without starting a thread per job.',
+    code: `val jobs = Channel<Job>(Channel.UNLIMITED)
+
+// Two workers share the same channel: each job goes to exactly one of them
+repeat(2) {
+    scope.launch(Dispatchers.Default) {
+        for (job in jobs) process(job)
+    }
+}`,
+    xml: 'Classic equivalent: Executors.newFixedThreadPool(2) with a shared LinkedBlockingQueue of tasks.',
+    quiz: {
+      q: 'Two workers are busy and a third job arrives. What happens?',
+      options: ['It runs right away, slowing both workers', 'It waits in the channel until a worker is free', 'It is discarded'],
+      answer: 1,
+      why: 'The channel holds the job until one of the workers loops back to receive it.',
+    },
+  },
+
+  /* ---- 11. Advanced Combining ---- */
+  {
+    id: 'concat', cat: CATS[10], icon: 'shuffle', title: 'flatMapConcat',
+    sub: 'Runs inner flows one after another, in order. Nothing runs in parallel and nothing is cancelled.',
+    explain: 'Compare with flatMapMerge(2), which runs in parallel, and flatMapLatest, which cancels. Each request takes 2 s and waits for the previous one to finish, so the order is kept.',
+    tracks: [{ id: 'a', label: 'Requests' }], outLabel: 'results', outColor: OUT,
+    script: [{ t: 400, track: 'a', v: 'A' }, { t: 700, track: 'a', v: 'B' }, { t: 900, track: 'a', v: 'C' }, { t: 1500, track: 'a', v: 'D' }],
+    buttons: [{ label: 'Request E', track: 'a', v: 'E' }],
+    compute: (evs) => {
+      const S = sorted(evs).filter((e) => e.track === 'a');
+      let freeAt = 0;
+      const out = [], bars = [];
+      S.forEach((e) => {
+        const start = Math.max(e.t, freeAt);
+        const end = start + 2000;
+        freeAt = end;
+        if (start > e.t) bars.push({ id: 'q' + e.id, start: e.t, end: start, label: `${e.v} queued`, color: '#64748b' });
+        bars.push({ id: 'b' + e.id, start, end, label: `GET ${e.v}`, color: OUT });
+        out.push({ id: 'o' + e.id, t: end, v: `${e.v} ✓` });
+      });
+      return { out, bars };
+    },
+    useCase: 'Draft autosave: each edit is saved after the previous one, so the server never receives them out of order.',
+    code: `edits
+    .flatMapConcat { edit -> flow { emit(api.save(edit)) } }   // one save at a time, in order
+    .collect { result -> ui.showSaved(result) }`,
+    xml: 'Classic equivalent: a single-threaded executor (Executors.newSingleThreadExecutor()) that runs your Retrofit calls one after another.',
+    quiz: {
+      q: 'flatMapConcat gets a new request while one is still running. What happens?',
+      options: ['It starts in parallel', 'It waits, and runs after the current one finishes', 'It cancels the running one'],
+      answer: 1,
+      why: 'Concat keeps order by queueing. flatMapMerge runs in parallel and flatMapLatest cancels.',
+    },
+  },
+  {
+    id: 'combinetransform', cat: CATS[10], icon: 'link', title: 'combineTransform',
+    sub: 'Like combine, but you decide what to emit: skip invalid pairs, or emit several values.',
+    explain: 'The rule here: emit only when A + B is at least 10. Pairs that fail the rule are blocked (✕). The lambda can emit zero, one or many values per input, which combine cannot do.',
+    tracks: TWO_TRACKS, outLabel: 'combineTransform', outColor: OUT,
+    script: [{ t: 400, track: 'a', v: 2 }, { t: 1100, track: 'b', v: 4 }, { t: 1900, track: 'a', v: 3 }, { t: 2600, track: 'b', v: 9 }, { t: 3400, track: 'a', v: 1 }, { t: 4200, track: 'b', v: 20 }],
+    buttons: PAIR_BUTTONS,
+    compute: (evs) => {
+      let la = null, lb = null;
+      const out = [], lines = [], st = {};
+      sorted(evs).forEach((e) => {
+        if (e.track === 'a') la = e; else lb = e;
+        if (la && lb) {
+          const other = e.track === 'a' ? lb : la;
+          if (la.v + lb.v >= 10) {
+            out.push({ id: 'o' + e.id, t: e.t, v: `${la.v}+${lb.v}` });
+            lines.push({ from: { t: other.t, r: other.track }, to: { t: e.t, r: 'out' } });
+          } else st[e.id] = 'blocked';
+        }
+      });
+      return { st, out, lines };
+    },
+    useCase: 'Order summary: show a summary only when price × quantity reaches the minimum order of 10; any other combination emits nothing.',
+    code: `combineTransform(price, quantity) { p, q ->
+    if (p * q >= 10) emit("$p x $q")        // emit only valid orders
+}.collect { summary -> ui.showSummary(summary) }`,
+    xml: 'Classic equivalent: a MediatorLiveData with two addSource() calls, where the observer returns early unless the combination is valid.',
+    quiz: {
+      q: 'What does combineTransform give you that combine does not?',
+      options: ['It runs faster', 'Control over what is emitted: skip a pair, or emit several values', 'It waits for both sides like zip'],
+      answer: 1,
+      why: 'Inside combineTransform you call emit() yourself, so you decide whether and how many values to send.',
+    },
+  },
 ];
 
 // Demo-specific fields set once, after definition.
@@ -898,6 +1216,22 @@ const SCENES = {
     useCase: 'Analytics: the user taps quickly. Each tap is queued and saved in order, even though each disk write takes 900 ms.' },
   sharein: { title: 'Home + Settings profile', subtitle: 'One request for both screens', inputs: ['Screen opened'], inputTrack: 'sub', listLabel: 'Requests sent',
     useCase: 'Home and Settings both show the user profile. shareIn makes one network call and shares the result, so opening Settings does not trigger a second request.' },
+  callbackflow: { title: 'Live location', subtitle: 'Listener removed on cancel', inputs: ['GPS callback'], listLabel: 'Location fixes',
+    useCase: 'Live location: a LocationCallback is registered when the screen starts collecting and removed when the collector is cancelled, so GPS is not left running.' },
+  coldflow: { title: 'Orders in two screens', subtitle: 'Each collector starts a run', inputs: ['Screen starts collecting'], inputTrack: 'sub', listLabel: 'Orders emitted',
+    useCase: 'Orders query in a repository: each screen that collects the Flow runs its own query. Add shareIn if you want one shared run.' },
+  oncompletion: { title: 'File download', subtitle: 'Cleanup after finish, error or cancel', inputs: ['Chunk received'], listLabel: 'Download log',
+    useCase: 'File download: when the transfer ends (success, error or user cancel), hide the progress bar and close the file, whichever happened.' },
+  retrywhen: { title: 'Sync on mobile data', subtitle: 'Backoff: 1 s, then 2 s', inputs: ['Sync attempt'], listLabel: 'Sync state',
+    useCase: 'Sync on mobile data: retry after 1 s, then 2 s, then show “Sync paused” instead of hammering the server every few milliseconds.' },
+  channel: { title: 'Photo upload queue', subtitle: 'Bounded buffer of 2 photos', inputs: ['Photo taken'], listLabel: 'Uploaded',
+    useCase: 'Upload queue: the camera takes photos faster than they can be uploaded. A bounded Channel(2) makes the camera wait, instead of holding every photo in memory.' },
+  workers: { title: 'Photo export', subtitle: 'Two workers, one shared queue', inputs: ['New job'], listLabel: 'Jobs finished',
+    useCase: 'Photo export: a pool of 2 workers processes export jobs in parallel from one shared queue, without starting a thread per job.' },
+  concat: { title: 'Draft autosave', subtitle: 'Saves run one after another', inputs: ['Edit'], listLabel: 'Saves done',
+    useCase: 'Draft autosave: each edit is saved after the previous one, so the server never receives them out of order.' },
+  combinetransform: { title: 'Order summary', subtitle: 'Show only valid orders', inputs: ['Price', 'Quantity'], listLabel: 'Summaries shown',
+    useCase: 'Order summary: show a summary only when price × quantity reaches the minimum order of 10; any other combination emits nothing.' },
 };
 // Which kind of Android screen the phone shows for each demo.
 const MOCK = {
@@ -907,6 +1241,8 @@ const MOCK = {
   sample: { type: 'ticker' }, timeout: { type: 'states' }, take: { type: 'list' }, catch: { type: 'list' },
   room: { type: 'list' }, snapshot: { type: 'feed' }, retry: { type: 'states' }, flatmerge: { type: 'grid' },
   buffer: { type: 'list' }, sharein: { type: 'states' },
+  callbackflow: { type: 'list' }, coldflow: { type: 'feed' }, oncompletion: { type: 'states' }, retrywhen: { type: 'states' },
+  channel: { type: 'list' }, workers: { type: 'grid' }, concat: { type: 'list' }, combinetransform: { type: 'form', cta: 'Save order' },
 };
 DEMOS.forEach((d) => {
   const s = SCENES[d.id] || {};
