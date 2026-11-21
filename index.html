@@ -1934,7 +1934,7 @@ const GLOSSARY = [
   { term: 'operator', def: 'A function that changes a flow: map, filter, debounce, combine and so on. It returns a new flow.' },
   { term: 'upstream / downstream', def: 'Upstream is everything before an operator (where values come from). Downstream is everything after it (where values go).' },
   { term: 'suspend', def: 'A function that can pause without blocking its thread, marked with the suspend keyword. Flow code runs inside suspend functions.' },
-  { term: 'coroutine', def: 'A lightweight task that can pause and resume. Flows are collected inside coroutines.' },
+  { term: 'coroutine', def: 'A lightweight task that can pause and resume without blocking its thread. Like a cook who starts the water boiling, then chops vegetables while it heats, and comes back when it is ready. Flows are collected inside coroutines, and a suspend function is the part that is allowed to pause.', example: 'viewModelScope.launch {\n    val orders = api.fetchOrders()   // pauses here, the thread is free meanwhile\n    _ui.value = orders               // resumes here when the reply arrives\n}' },
   { term: 'dispatcher', def: 'Which thread a coroutine runs on: Dispatchers.Main (UI), Dispatchers.IO (disk and network), Dispatchers.Default (heavy CPU work).' },
   { term: 'scope', def: 'The lifetime of coroutines. viewModelScope is cancelled when the ViewModel is cleared, so its work stops too.' },
   { term: 'cancellation', def: 'Stopping work early. When the collector leaves, the flow stops emitting and its cleanup code (onCompletion, awaitClose) runs.' },
