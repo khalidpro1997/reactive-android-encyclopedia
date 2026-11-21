@@ -19,6 +19,17 @@
   @keyframes flash { from { background: rgba(167,139,250,.45); } to { background: transparent; } }
   .stripes { background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.14) 0 6px, transparent 6px 12px); }
   pre { tab-size: 4; }
+  /* Light theme: re-map the dark palette used by the Tailwind classes */
+  html.light body { background: #f8fafc; color: #0f172a; }
+  html.light .bg-slate-950 { background-color: #f1f5f9 !important; }
+  html.light .bg-slate-900 { background-color: #ffffff !important; }
+  html.light .bg-slate-900\/70, html.light .bg-slate-900\/80 { background-color: #ffffff !important; }
+  html.light .bg-slate-800 { background-color: #e2e8f0 !important; }
+  html.light .bg-slate-800\/70, html.light .bg-slate-800\/60 { background-color: #e2e8f0 !important; }
+  html.light .text-white { color: #0f172a !important; }
+  html.light .text-slate-100, html.light .text-slate-200, html.light .text-slate-300 { color: #334155 !important; }
+  html.light .text-slate-400, html.light .text-slate-500 { color: #64748b !important; }
+  html.light .border-slate-800, html.light .border-slate-700 { border-color: #cbd5e1 !important; }
 </style>
 </head>
 <body>
@@ -34,7 +45,7 @@ const TC = { a: '#22d3ee', b: '#fb923c' };   // track A = cyan, track B = orange
 const OUT = '#a78bfa';       // output / purple
 const GOOD = '#34d399';
 const REPLAY = '#facc15';
-const CATS = ['Combining & Merging', 'Transforming & Filtering', 'Async, Search & Timing', 'Hot vs. Cold Streams', 'Operators You Will Use Next', 'Android Libraries in Practice', 'Concurrency, Retry & Sharing', 'Flow Creation', 'Completion & Errors', 'Channels & Producers', 'Advanced Combining', 'Threads & State'];
+const CATS = ['Combining & Merging', 'Transforming & Filtering', 'Async, Search & Timing', 'Hot vs. Cold Streams', 'Operators You Will Use Next', 'Android Libraries in Practice', 'Concurrency, Retry & Sharing', 'Flow Creation', 'Completion & Errors', 'Channels & Producers', 'Advanced Combining', 'Threads & State', 'Other Reactive Libraries', 'Operators & Testing', 'Storage & Paging'];
 
 // The Android screen shown in the phone mockup for each category.
 const CAT_SCREENS = {
@@ -50,6 +61,9 @@ const CAT_SCREENS = {
   [CATS[9]]: { title: 'Upload queue', subtitle: 'Buffers & worker pools', icon: 'inbox', accent: '#2dd4bf', inputs: ['Item'], listLabel: 'Received' },
   [CATS[10]]: { title: 'Order screen', subtitle: 'Order, parallelism & rules', icon: 'shuffle', accent: '#c084fc', inputs: ['Input'], listLabel: 'Output' },
   [CATS[11]]: { title: 'Reader & ViewModel', subtitle: 'Threads, state & loading', icon: 'activity', accent: '#a3e635', inputs: ['Input'], listLabel: 'Screen output' },
+  [CATS[12]]: { title: 'Legacy screen', subtitle: 'LiveData and RxJava', icon: 'book', accent: '#60a5fa', inputs: ['Input'], listLabel: 'Observer output' },
+  [CATS[13]]: { title: 'Search & tests', subtitle: 'Operators and unit tests', icon: 'filter', accent: '#fb7185', inputs: ['Input'], listLabel: 'Output' },
+  [CATS[14]]: { title: 'Settings & feed', subtitle: 'Storage and paged lists', icon: 'database', accent: '#4ade80', inputs: ['Input'], listLabel: 'Screen output' },
 };
 
 /* ---------- Lucide icon geometry (inlined, no CDN) ---------- */
@@ -361,7 +375,7 @@ val searchTerms: Flow<String> = queries.filter { it.length >= 4 }`,
     ],
     compute: (evs) => {
       let acc = 0;
-      const out = sorted(evs).filter((e) => e.track === 'a').map((e) => { acc += e.v; return { id: 'o' + e.id, t: e.t, v: acc }; });
+      const out = [{ id: 'init', t: 0, v: 0 }, ...sorted(evs).filter((e) => e.track === 'a').map((e) => { acc += e.v; return { id: 'o' + e.id, t: e.t, v: acc }; })];
       return { out };
     },
     useCase: 'Live cart subtotal shown in a toolbar badge that grows with each added item.',
@@ -1278,6 +1292,341 @@ viewModelScope.launch { loadPages().collect { page -> _ui.value = page } }`,
       why: 'onStart runs at the beginning of collection, so the UI can show the loading state immediately.',
     },
   },
+
+  /* ---- 13. channelFlow (Flow Creation) ---- */
+  {
+    id: 'channelflow', cat: CATS[7], icon: 'radio', title: 'channelFlow',
+    sub: 'Like callbackFlow, but several child coroutines can send values into one flow.',
+    explain: 'Inside channelFlow { }, you launch child coroutines and call send() from any of them. Sensor A and Sensor B each send readings on their own schedule, and the collector gets them merged in time order.',
+    tracks: [{ id: 'a', label: 'Sensor A' }, { id: 'b', label: 'Sensor B' }], outLabel: 'collector', outColor: OUT,
+    script: [{ t: 400, track: 'a', v: 1 }, { t: 1100, track: 'b', v: 10 }, { t: 1900, track: 'a', v: 2 }, { t: 2600, track: 'a', v: 3 }, { t: 3400, track: 'b', v: 20 }],
+    buttons: PAIR_BUTTONS,
+    compute: (evs) => ({ out: sorted(evs).map((e) => ({ id: 'o' + e.id, t: e.t, v: e.v, color: TC[e.track] })) }),
+    useCase: 'Fitness screen: accelerometer and GPS readings arrive on separate coroutines and are drawn on one chart.',
+    code: `fun sensorReadings(): Flow<Reading> = channelFlow {
+    launch { accelerometer.collect { send(Reading.Accel(it)) } }
+    launch { gps.collect { send(Reading.Gps(it)) } }
+    // The flow ends when both child coroutines finish
+}`,
+    xml: 'Classic equivalent: two listeners that both post into one shared queue, read by a single handler on the UI thread.',
+    quiz: {
+      q: 'Inside channelFlow, how do values get out to the collector?',
+      options: ['With return', 'With send() from any child coroutine', 'With emit() only'],
+      answer: 1,
+      why: 'channelFlow gives you a channel: any coroutine inside it can call send(), so several sources can feed one flow.',
+    },
+  },
+
+  /* ---- 14. Other Reactive Libraries ---- */
+  {
+    id: 'livedata', cat: CATS[12], icon: 'book', title: 'LiveData',
+    sub: 'Jetpack’s older observable holder. It only delivers values to screens that are started.',
+    explain: 'While the screen is stopped (in the background), LiveData keeps only the latest value. When the screen starts again, the observer gets that latest value once. Earlier values are dropped (✕). Flow with cancelled collectors behaves differently.',
+    tracks: [{ id: 'a', label: 'setValue()' }, { id: 'sub', label: 'screen' }], outLabel: 'observer', outColor: OUT,
+    script: [{ t: 400, track: 'a', v: 'v1' }, { t: 1200, track: 'sub', v: 'stop' }, { t: 1800, track: 'a', v: 'v2' }, { t: 2400, track: 'a', v: 'v3' }, { t: 3500, track: 'sub', v: 'start' }, { t: 4200, track: 'a', v: 'v4' }],
+    buttons: [
+      { label: 'setValue()', track: 'a', v: '#' },
+      { label: 'Screen stops', track: 'sub', v: 'stop' },
+      { label: 'Screen starts', track: 'sub', v: 'start' },
+    ],
+    compute: (evs) => {
+      const S = sorted(evs);
+      let active = true, pending = null;
+      const st = {}, out = [];
+      S.forEach((e) => {
+        if (e.track === 'sub') {
+          if (e.v === 'start') {
+            active = true;
+            if (pending) { out.push({ id: 'p' + pending.id, t: e.t, v: pending.v, color: REPLAY }); pending = null; }
+          } else active = false;
+        } else if (e.track === 'a') {
+          if (active) out.push({ id: 'o' + e.id, t: e.t, v: e.v });
+          else { if (pending) st[pending.id] = 'dropped'; pending = e; }
+        }
+      });
+      return { st, out };
+    },
+    useCase: 'Profile screen: if the user leaves for a while and comes back, the observer receives the latest name once, and older updates are not replayed.',
+    code: `private val _user = MutableLiveData<User>()
+val user: LiveData<User> = _user
+
+// In the Fragment or Activity
+viewModel.user.observe(viewLifecycleOwner) { user ->
+    nameView.text = user.name     // only called while the screen is STARTED
+}`,
+    xml: 'LiveData is the classic Android answer to this problem. Flow replaced it in most new code, but many apps still use it.',
+    quiz: {
+      q: 'The screen is stopped and setValue() is called twice. What does the observer get when the screen starts again?',
+      options: ['Both values', 'Only the latest value', 'Nothing'],
+      answer: 1,
+      why: 'LiveData keeps only the latest value while inactive and delivers that one when the observer becomes active.',
+    },
+  },
+  {
+    id: 'rxjava', cat: CATS[12], icon: 'radio', title: 'RxJava subscribeOn / observeOn',
+    sub: 'RxJava is the older reactive library. subscribeOn picks where the work runs, observeOn picks where results arrive.',
+    explain: 'subscribeOn(Schedulers.io()) moves the work to a background thread (the green bars, 500 ms each). observeOn(AndroidSchedulers.mainThread()) delivers each result to the UI thread. This is the same idea as flowOn.',
+    tracks: [{ id: 'a', label: 'Requests' }], outLabel: 'Main thread', outColor: OUT,
+    script: [{ t: 400, track: 'a', v: 'R1' }, { t: 700, track: 'a', v: 'R2' }, { t: 2000, track: 'a', v: 'R3' }],
+    buttons: [{ label: 'New request', track: 'a', v: 'R' }],
+    compute: (evs) => {
+      const S = sorted(evs).filter((e) => e.track === 'a');
+      let freeAt = 0;
+      const out = [], bars = [];
+      S.forEach((e) => {
+        const start = Math.max(e.t, freeAt);
+        const end = start + 500;
+        freeAt = end;
+        bars.push({ id: 'io' + e.id, start, end, label: `IO: ${e.v}`, color: GOOD });
+        out.push({ id: 'o' + e.id, t: end, v: `${e.v} on Main` });
+      });
+      return { out, bars };
+    },
+    useCase: 'Older Activity that loads orders: the network call runs in the background, and the list is updated on the UI thread.',
+    code: `api.loadOrders()                                // Single<List<Order>>
+    .subscribeOn(Schedulers.io())                  // network call on a background thread
+    .observeOn(AndroidSchedulers.mainThread())     // result delivered on the UI thread
+    .subscribe(
+        { orders -> adapter.submit(orders) },
+        { error -> showError(error) }
+    )`,
+    xml: 'Classic equivalent: AsyncTask, where doInBackground() does the work and onPostExecute() updates the views. RxJava splits the same two steps into operators.',
+    quiz: {
+      q: 'Which call moves the work to a background thread?',
+      options: ['observeOn(mainThread())', 'subscribeOn(Schedulers.io())', 'subscribe()'],
+      answer: 1,
+      why: 'subscribeOn chooses the thread where the work starts. observeOn chooses where the results are delivered.',
+    },
+  },
+
+  /* ---- 15. Operators & Testing ---- */
+  {
+    id: 'collectlatest', cat: CATS[13], icon: 'shuffle', title: 'collectLatest',
+    sub: 'Like collect, but if a new value arrives while the previous block is still running, the old block is cancelled.',
+    explain: 'Each value starts a slow block (1000 ms). If a new value arrives before it finishes, the old block is cancelled (✕) and the new block starts. collect would wait for each block to finish instead.',
+    tracks: [{ id: 'a', label: 'Queries' }], outLabel: 'results shown', outColor: OUT,
+    script: [{ t: 400, track: 'a', v: 'Kot' }, { t: 900, track: 'a', v: 'Kotlin' }, { t: 2600, track: 'a', v: 'Flow' }],
+    buttons: [{ label: 'New query', track: 'a', v: 'Q' }],
+    compute: (evs) => {
+      const S = sorted(evs).filter((e) => e.track === 'a');
+      const st = {}, out = [], bars = [];
+      S.forEach((e, i) => {
+        const nx = S[i + 1];
+        const end = e.t + 1000;
+        const cancelAt = nx && nx.t < end ? nx.t : undefined;
+        if (cancelAt !== undefined) st[e.id] = 'cancelled';
+        else out.push({ id: 'o' + e.id, t: end, v: e.v });
+        bars.push({ id: 'b' + e.id, start: e.t, end, cancelAt, label: `show ${e.v}`, color: OUT });
+      });
+      return { st, out, bars };
+    },
+    useCase: 'Search results: if the user types again while the previous results are still loading, only the newest results are shown.',
+    code: `queries.collectLatest { query ->
+    delay(1000)                                  // slow work for this query
+    ui.showResults(api.search(query))
+}   // a new query cancels this block and starts a new one`,
+    xml: 'Classic equivalent: keep a reference to the running Job or AsyncTask and cancel it before starting the next one.',
+    quiz: {
+      q: 'A new value arrives while collectLatest is still running the previous block. What happens?',
+      options: ['The new value waits', 'The old block is cancelled and the new one starts', 'The new value is dropped'],
+      answer: 1,
+      why: 'collectLatest always works on the newest value and cancels the older block.',
+    },
+  },
+  {
+    id: 'transformlatest', cat: CATS[13], icon: 'filter', title: 'transformLatest',
+    sub: 'For each value, a transform can emit several results (like Loading, then the answer). A new value cancels the old transform.',
+    explain: 'Each query first emits “Loading…” straight away, then the result 800 ms later. If a new query arrives before that, the old transform is cancelled (✕), so its late result never shows.',
+    tracks: [{ id: 'a', label: 'Queries' }], outLabel: 'screen state', outColor: OUT,
+    script: [{ t: 400, track: 'a', v: 'Kot' }, { t: 2200, track: 'a', v: 'Kotlin' }],
+    buttons: [{ label: 'New query', track: 'a', v: 'Q' }],
+    compute: (evs) => {
+      const S = sorted(evs).filter((e) => e.track === 'a');
+      const st = {}, out = [];
+      S.forEach((e, i) => {
+        out.push({ id: 'l' + e.id, t: e.t, v: 'Loading…', color: '#facc15' });
+        const nx = S[i + 1];
+        if (nx && nx.t < e.t + 800) st[e.id] = 'cancelled';
+        else out.push({ id: 'd' + e.id, t: e.t + 800, v: `${e.v} ✓`, color: GOOD });
+      });
+      return { st, out };
+    },
+    useCase: 'Search box: show a spinner right away, then the results. Typing again cancels the old search, so its result never replaces the new one.',
+    code: `queries.transformLatest { query ->
+    emit(UiState.Loading)                                   // emitted right away
+    emit(UiState.Success(api.search(query)))                // emitted when the search is done
+}.collect { state -> render(state) }`,
+    xml: 'Classic equivalent: set the spinner to visible, start the Retrofit call, and cancel the previous call before starting a new one.',
+    quiz: {
+      q: 'What is the extra power of transformLatest compared with mapLatest?',
+      options: ['It runs faster', 'Each input can emit several values, like Loading and then the result', 'It keeps every old result'],
+      answer: 1,
+      why: 'mapLatest returns exactly one value per input. transformLatest lets you emit as many as you need.',
+    },
+  },
+  {
+    id: 'withindex', cat: CATS[13], icon: 'database', title: 'withIndex',
+    sub: 'Adds a position number to each value, like enumerate in other languages.',
+    explain: 'Each value is wrapped together with its index, starting at 0. Here the list shows “#0 apple”, “#1 banana”, and so on. The index is the position of the value in the flow, not a time.',
+    tracks: [{ id: 'a', label: 'Fruits' }], outLabel: 'numbered list', outColor: OUT,
+    script: [{ t: 400, track: 'a', v: 'apple' }, { t: 1100, track: 'a', v: 'banana' }, { t: 1800, track: 'a', v: 'cherry' }, { t: 2600, track: 'a', v: 'date' }],
+    buttons: [{ label: 'Add “fig”', track: 'a', v: 'fig' }],
+    compute: (evs) => {
+      const S = sorted(evs).filter((e) => e.track === 'a');
+      const out = S.map((e, i) => ({ id: 'o' + e.id, t: e.t, v: `#${i} ${e.v}` }));
+      return { out };
+    },
+    useCase: 'Numbered chat or step list: “Step 3 of 5”, or knowing which item in a list was tapped.',
+    code: `fruits.withIndex().collect { (index, fruit) ->
+    println("#$index $fruit")     // index is 0, 1, 2, ...
+}`,
+    xml: 'Classic equivalent: a counter variable that you increment inside the loop, or the position argument of onBindViewHolder().',
+    quiz: {
+      q: 'What does withIndex() give you for each value?',
+      options: ['The value and its position', 'Only the position', 'The value sorted'],
+      answer: 0,
+      why: 'withIndex wraps each value in an IndexedValue with index and value fields.',
+    },
+  },
+  {
+    id: 'runningfold', cat: CATS[13], icon: 'sigma', title: 'runningFold',
+    sub: 'Like scan: keeps a running result, and it also emits the starting value first.',
+    explain: 'runningFold(0) emits 0 before any input arrives, then each running total. In kotlinx.coroutines, scan is the same operator as runningFold, so the scan demo also starts with its initial value.',
+    tracks: [{ id: 'a', label: 'Deposits' }], outLabel: 'balance', outColor: OUT,
+    script: [{ t: 600, track: 'a', v: 5 }, { t: 1400, track: 'a', v: 12 }, { t: 2200, track: 'a', v: 3 }],
+    buttons: [{ label: 'Deposit +10', track: 'a', v: 10 }],
+    compute: (evs) => {
+      let acc = 0;
+      const out = [{ id: 'init', t: 0, v: 0 }];
+      sorted(evs).filter((e) => e.track === 'a').forEach((e) => { acc += e.v; out.push({ id: 'o' + e.id, t: e.t, v: acc }); });
+      return { out };
+    },
+    useCase: 'Bank balance on a screen: the balance starts at 0 and changes with each deposit.',
+    code: `deposits
+    .runningFold(0) { balance, amount -> balance + amount }   // first value is 0
+    .collect { balance -> ui.showBalance(balance) }`,
+    xml: 'Classic equivalent: a balance field that starts at 0, updated in each callback, with the first value drawn before any callback arrives.',
+    quiz: {
+      q: 'Does runningFold(0) emit the starting value 0 before any input?',
+      options: ['Yes, the initial value comes first', 'No, only after the first input', 'It depends on the dispatcher'],
+      answer: 0,
+      why: 'runningFold always emits its initial value first, which is why the balance can show 0 on screen before any deposit.',
+    },
+  },
+  {
+    id: 'turbine', cat: CATS[13], icon: 'check', title: 'Testing with Turbine',
+    sub: 'Turbine checks each value a Flow emits, in order, so tests do not depend on timing.',
+    explain: 'The top row is what the flow emitted. The bottom row is what the test expects. Each pair is compared in order: a match shows ✓, and a mismatch or an extra value shows FAIL.',
+    tracks: [{ id: 'a', label: 'Flow emits' }, { id: 'b', label: 'Test expects' }], outLabel: 'test result', outColor: OUT,
+    script: [{ t: 400, track: 'a', v: 'Loading' }, { t: 1400, track: 'a', v: 'Success' }, { t: 500, track: 'b', v: 'Loading' }, { t: 1500, track: 'b', v: 'Success' }],
+    buttons: [
+      { label: 'Flow emits Error', track: 'a', v: 'Error' },
+      { label: 'Test expects Success', track: 'b', v: 'Success' },
+    ],
+    compute: (evs) => {
+      const A = sorted(evs).filter((e) => e.track === 'a');
+      const B = sorted(evs).filter((e) => e.track === 'b');
+      const st = {}, out = [];
+      const n = Math.max(A.length, B.length);
+      for (let i = 0; i < n; i++) {
+        const a = A[i], b = B[i];
+        if (a && b) {
+          if (a.v === b.v) out.push({ id: 'ok' + a.id, t: Math.max(a.t, b.t), v: `✓ ${a.v}`, color: GOOD });
+          else { out.push({ id: 'fail' + a.id, t: Math.max(a.t, b.t), v: `FAIL ${a.v}`, color: '#f87171' }); st[a.id] = 'blocked'; }
+        } else if (a && !b) {
+          out.push({ id: 'extra' + a.id, t: a.t, v: `extra ${a.v}`, color: '#f87171' });
+        }
+      }
+      return { st, out };
+    },
+    useCase: 'Unit test for a ViewModel: check that the UI states arrive in the right order, with no Thread.sleep.',
+    code: `@Test
+fun emitsLoadingThenSuccess() = runTest {
+    viewModel.state.test {                                   // Turbine
+        assertEquals(UiState.Loading, awaitItem())           // next value must be Loading
+        assertEquals(UiState.Success, awaitItem())           // then Success
+        cancelAndIgnoreRemainingEvents()
+    }
+}`,
+    xml: 'Classic equivalent: a LiveData test with InstantTaskExecutorRule and a manual observer that records every value into a list.',
+    quiz: {
+      q: 'What does awaitItem() do in Turbine?',
+      options: ['Waits for the next value and checks it', 'Starts the flow', 'Cancels the test'],
+      answer: 0,
+      why: 'awaitItem() suspends until the next value arrives, returns it, and fails the test if nothing arrives in time.',
+    },
+  },
+
+  /* ---- 16. Storage & Paging ---- */
+  {
+    id: 'datastore', cat: CATS[14], icon: 'database', title: 'DataStore',
+    sub: 'Saves settings and returns them as a Flow. Every write produces a new emission.',
+    explain: 'When you start collecting, DataStore emits the saved value right away, like StateFlow. Each edit() writes a new value and the collector gets it. distinctUntilChanged skips writes that do not change anything.',
+    tracks: [{ id: 'a', label: 'Writes' }], outLabel: 'darkMode Flow', outColor: OUT,
+    script: [{ t: 900, track: 'a', v: 'dark' }, { t: 1800, track: 'a', v: 'dark' }, { t: 2700, track: 'a', v: 'light' }],
+    buttons: [
+      { label: 'Set dark', track: 'a', v: 'dark' },
+      { label: 'Set light', track: 'a', v: 'light' },
+      { label: 'Set light again', track: 'a', v: '=' },
+    ],
+    compute: (evs) => {
+      let last = 'light';
+      const st = {}, out = [{ id: 'saved', t: 0, v: 'light' }];
+      sorted(evs).filter((e) => e.track === 'a').forEach((e) => {
+        if (e.v === last) st[e.id] = 'ignored';
+        else { last = e.v; out.push({ id: 'o' + e.id, t: e.t, v: e.v }); }
+      });
+      return { st, out };
+    },
+    useCase: 'Settings screen: the dark-mode switch shows the saved value, and changing it saves the new value for the whole app.',
+    code: `val DARK_MODE = booleanPreferencesKey("dark_mode")
+
+val darkMode: Flow<Boolean> = dataStore.data
+    .map { prefs -> prefs[DARK_MODE] ?: false }
+    .distinctUntilChanged()
+
+suspend fun setDarkMode(enabled: Boolean) {
+    dataStore.edit { prefs -> prefs[DARK_MODE] = enabled }
+}`,
+    xml: 'Classic equivalent: SharedPreferences with an OnSharedPreferenceChangeListener. DataStore is asynchronous and works safely with coroutines.',
+    quiz: {
+      q: 'What does DataStore emit right after you start collecting its Flow?',
+      options: ['Nothing until the first write', 'The current saved value', 'An error'],
+      answer: 1,
+      why: 'Like StateFlow, a new collector immediately gets the current saved preferences.',
+    },
+  },
+  {
+    id: 'paging', cat: CATS[14], icon: 'scroll', title: 'Paging 3',
+    sub: 'Loads a long list one page at a time, as the user scrolls, and exposes it as a Flow of PagingData.',
+    explain: 'The first page loads at the start. When the user scrolls close to the end, Paging requests the next page (grey bar). Each finished page is added to the list. Only the pages loaded so far are shown.',
+    tracks: [{ id: 'a', label: 'Scroll near end' }], outLabel: 'pages loaded', outColor: OUT,
+    script: [{ t: 1600, track: 'a', v: 'more' }, { t: 3300, track: 'a', v: 'more' }],
+    buttons: [{ label: 'Scroll near end', track: 'a', v: 'more' }],
+    compute: (evs) => {
+      const S = sorted(evs).filter((e) => e.track === 'a');
+      const out = [{ id: 'p1', t: 0, v: 'page 1 ✓' }], bars = [];
+      let page = 1;
+      S.forEach((e) => {
+        page += 1;
+        bars.push({ id: 'l' + e.id, start: e.t, end: e.t + 800, label: `load page ${page}`, color: '#64748b' });
+        out.push({ id: 'o' + e.id, t: e.t + 800, v: `page ${page} ✓`, color: GOOD });
+      });
+      return { out, bars };
+    },
+    useCase: 'Infinite feed of posts: load 20 posts at a time, and request the next page only when the user nears the end of the list.',
+    code: `val posts: Flow<PagingData<Post>> = Pager(
+    config = PagingConfig(pageSize = 20),
+    pagingSourceFactory = { postDao.pagingSource() }   // Room can return a PagingSource
+).flow.cachedIn(viewModelScope)                       // keep loaded pages across rotation`,
+    xml: 'Classic equivalent: a RecyclerView.OnScrollListener that requests the next page near the end, with a manual page counter and a loading flag.',
+    quiz: {
+      q: 'What triggers loading the next page in Paging 3?',
+      options: ['A timer every second', 'The user scrolling close to the end, so the list needs more', 'The app starting'],
+      answer: 1,
+      why: 'Paging loads pages on demand, when the visible items get close to the last loaded item.',
+    },
+  },
 ];
 
 // Demo-specific fields set once, after definition.
@@ -1351,6 +1700,26 @@ const SCENES = {
     useCase: 'Orders screen in a ViewModel: rotating the phone should not reload the orders, but leaving the screen for a long time should stop the work.' },
   onstart: { title: 'Items screen', subtitle: 'Spinner first, then the list', inputs: ['Server item'], listLabel: 'Screen states',
     useCase: 'Screen opens: show a spinner right away, then replace it with the list when the server responds.' },
+  channelflow: { title: 'Fitness tracker', subtitle: 'Two sensors, one chart', inputs: ['Sensor reading'], listLabel: 'Chart points',
+    useCase: 'Fitness screen: accelerometer and GPS readings arrive on separate coroutines and are drawn on one chart.' },
+  livedata: { title: 'Profile screen', subtitle: 'Latest name when the screen is back', inputs: ['setValue() call'], inputTrack: 'a', listLabel: 'Name shown',
+    useCase: 'Profile screen: if the user leaves for a while and comes back, the observer receives the latest name once, and older updates are not replayed.' },
+  rxjava: { title: 'Orders list (older screen)', subtitle: 'Work on IO, show on Main', inputs: ['Load request'], listLabel: 'Adapter updates',
+    useCase: 'Older Activity that loads orders: the network call runs in the background, and the list is updated on the UI thread.' },
+  collectlatest: { title: 'Search results', subtitle: 'Show only the newest query', inputs: ['Query'], listLabel: 'Results shown',
+    useCase: 'Search results: if the user types again while the previous results are still loading, only the newest results are shown.' },
+  transformlatest: { title: 'Search with spinner', subtitle: 'Loading first, then the answer', inputs: ['Query'], listLabel: 'Screen state',
+    useCase: 'Search box: show a spinner right away, then the results. Typing again cancels the old search, so its result never replaces the new one.' },
+  withindex: { title: 'Numbered list', subtitle: 'Position of each item', inputs: ['Item added'], listLabel: 'Rows shown',
+    useCase: 'Numbered chat or step list: “Step 3 of 5”, or knowing which item in a list was tapped.' },
+  runningfold: { title: 'Bank balance', subtitle: 'Starts at 0, then changes', inputs: ['Deposit'], listLabel: 'Balance shown',
+    useCase: 'Bank balance on a screen: the balance starts at 0 and changes with each deposit.' },
+  turbine: { title: 'ViewModel unit test', subtitle: 'Flow values vs expected values', inputs: ['Flow emit'], inputTrack: 'a', listLabel: 'Test result',
+    useCase: 'Unit test for a ViewModel: check that the UI states arrive in the right order, with no Thread.sleep.' },
+  datastore: { title: 'Settings screen', subtitle: 'Dark mode switch', inputs: ['Switch changed'], listLabel: 'darkMode Flow',
+    useCase: 'Settings screen: the dark-mode switch shows the saved value, and changing it saves the new value for the whole app.' },
+  paging: { title: 'Infinite feed', subtitle: 'Next page near the end', inputs: ['Scroll position'], listLabel: 'Pages loaded',
+    useCase: 'Infinite feed of posts: load 20 posts at a time, and request the next page only when the user nears the end of the list.' },
 };
 // Plain-language explanation (everyday comparison) for each demo.
 const SIMPLE = {
@@ -1387,8 +1756,26 @@ const SIMPLE = {
   flowon: 'Like a cook in the kitchen and a waiter in the dining room. The cooking happens in the kitchen (IO), and the waiter brings the food to the table (Main), so the dining room never waits.',
   statein: 'Like a coffee machine that stays warm for a few minutes after the last cup. If someone comes back quickly, it does not heat up again. If nobody comes back, it turns off.',
   onstart: 'Like a restaurant that shows a “your food is coming” sign the moment you sit down, before the food arrives.',
+  channelflow: 'Like two cameras sending photos to the same TV. Whichever camera sends a picture, it appears on the one screen, in the order they arrive.',
+  livedata: 'Like a shared whiteboard for a meeting room. If you are out of the room, you only care about the latest message written when you come back.',
+  rxjava: 'Like a kitchen and a dining room. The cooking is done in the kitchen (background thread), and the waiter brings it to the table (UI thread).',
+  collectlatest: 'Like a waiter who gets a new order while still cooking the old one. The old one is thrown away, and the newest order is cooked.',
+  transformlatest: 'Like ordering a pizza: “we are making it” appears first, then the pizza. If you change your order, the old pizza is cancelled.',
+  withindex: 'Like a numbered line at a bakery. Each person gets a number based on where they stand in the line.',
+  runningfold: 'Like a bank account. It starts at 0 before any deposit, then every deposit adds to the balance.',
+  turbine: 'Like a teacher checking a student’s answers one by one. Each answer must match the expected answer, in the same order.',
+  datastore: 'Like a notebook where you write a setting down. Anyone who asks gets the latest written value, and a new note tells them when it changes.',
+  paging: 'Like a bookshelf in a library. Books are brought up from the basement one shelf at a time, only when you reach the end of the shelf you are on.',
 };
 
+// “Predict the output” challenges: the animation waits until the learner answers.
+const PREDICT = {
+  debounce: { q: 'You type “k”, “ko”, “kot” quickly, then stop for a second. How many values come out?', options: ['3', '1', '0'], answer: 1, why: 'debounce waits for a pause and emits only the last value.' },
+  zip: { q: 'Track A sends 1, 2, 3. Track B sends only 10. How many pairs come out?', options: ['3', '1', '2'], answer: 1, why: 'zip pairs the first value of each track. The rest wait for a partner that never arrives.' },
+  take: { q: 'take(3) receives 6 values. How many reach the collector?', options: ['6', '3', '2'], answer: 1, why: 'take(3) lets 3 through, then completes and cancels the upstream.' },
+  retry: { q: 'retry(2) gets fail, fail, fail. What does the collector finally see?', options: ['Nothing, then ok', 'An error', 'Three values'], answer: 1, why: 'Two retries are allowed. After the third failure, the error goes downstream.' },
+  flatmerge: { q: 'flatMapMerge(concurrency = 2) gets three requests at once. How many run at the same time?', options: ['3', '2', '1'], answer: 1, why: 'Two run in parallel, and the third waits in a queue.' },
+};
 // Which kind of Android screen the phone shows for each demo.
 const MOCK = {
   combine: { type: 'form', cta: 'Sign In' }, zip: { type: 'list' }, merge: { type: 'list' }, transform: { type: 'badge' },
@@ -1400,12 +1787,16 @@ const MOCK = {
   callbackflow: { type: 'list' }, coldflow: { type: 'feed' }, oncompletion: { type: 'states' }, retrywhen: { type: 'states' },
   channel: { type: 'list' }, workers: { type: 'grid' }, concat: { type: 'list' }, combinetransform: { type: 'form', cta: 'Save order' },
   flowon: { type: 'list' }, statein: { type: 'ticker' }, onstart: { type: 'states' },
+  channelflow: { type: 'grid' }, livedata: { type: 'states' }, rxjava: { type: 'list' }, collectlatest: { type: 'search' },
+  transformlatest: { type: 'search' }, withindex: { type: 'list' }, runningfold: { type: 'badge' }, turbine: { type: 'states' },
+  datastore: { type: 'form', cta: 'Save' }, paging: { type: 'feed' },
 };
 DEMOS.forEach((d) => {
   const s = SCENES[d.id] || {};
   d.scene = { ...CAT_SCREENS[d.cat], ...s, ...(MOCK[d.id] || { type: 'list' }) };
   if (s.useCase) d.useCase = s.useCase;
   d.simple = SIMPLE[d.id] || '';
+  d.predict = PREDICT[d.id] || null;
 });
 
 /* ---------- Timeline rendering ---------- */
@@ -1547,7 +1938,14 @@ function AppStatePanel({ events, now }) {
 /* ---------- Demo page ---------- */
 function DemoView({ demo }) {
   const [now, setNow] = useState(0);
-  const [playing, setPlaying] = useState(true);
+  const [playing, setPlaying] = useState(!demo.predict);
+  const [predicted, setPredicted] = useState(!demo.predict);
+  const [compareId, setCompareId] = useState('');
+  useEffect(() => {
+    const toggle = () => { if (predicted) setPlaying((p) => !p); };
+    window.addEventListener('reactive-toggle', toggle);
+    return () => window.removeEventListener('reactive-toggle', toggle);
+  }, [predicted]);
   const [speed, setSpeed] = useState(1);
   const [manual, setManual] = useState([]);
   const [copied, setCopied] = useState(false);
@@ -1600,7 +1998,7 @@ function DemoView({ demo }) {
     });
   };
 
-  const reset = () => { setNow(0); setManual([]); setPlaying(true); };
+  const reset = () => { setNow(0); setManual([]); setPlaying(predicted); };
 
   const copy = async () => {
     try { await navigator.clipboard.writeText(demo.code); setCopied(true); }
@@ -1645,6 +2043,10 @@ function DemoView({ demo }) {
         <span className="ml-auto font-mono text-xs text-slate-500">t = {(now / 1000).toFixed(1)}s</span>
       </section>
 
+      {demo.predict && !predicted && (
+        <PredictCard key={demo.id} predict={demo.predict} onDone={() => { setPredicted(true); setPlaying(true); }} />
+      )}
+
       {/* animation + Android screen */}
       <section className="flex flex-col gap-6 lg:flex-row lg:items-start">
         <div className="min-w-0 flex-1">
@@ -1668,6 +2070,30 @@ function DemoView({ demo }) {
         )}
         </div>
         <PhoneScreen demo={demo} events={events} res={res} now={now} />
+      </section>
+
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wider text-purple-300">
+          Compare mode
+          <select value={compareId} onChange={(e) => setCompareId(e.target.value)}
+            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-xs normal-case tracking-normal text-slate-100">
+            <option value="">— none —</option>
+            {DEMOS.filter((d) => d.id !== demo.id && !d.kind).map((d) => (
+              <option key={d.id} value={d.id}>{d.title}</option>
+            ))}
+          </select>
+          <span className="font-normal normal-case tracking-normal text-slate-500">same input, different operator</span>
+        </div>
+        {compareId && (() => {
+          const other = DEMOS.find((d) => d.id === compareId);
+          const r2 = other.compute(events, now);
+          return (
+            <div>
+              <div className="mb-2 font-mono text-xs text-slate-400">{other.title}</div>
+              <Timeline rows={buildRows(other, events, r2)} lines={r2.lines || []} now={now} />
+            </div>
+          );
+        })()}
       </section>
 
       {demo.panel === 'appstate' && <AppStatePanel events={events} now={now} />}
@@ -1897,10 +2323,41 @@ function PhoneScreen({ demo, events, res, now }) {
   );
 }
 
+/* ---------- Predict-the-output challenge ---------- */
+function PredictCard({ predict, onDone }) {
+  const [pick, setPick] = useState(null);
+  const ok = pick === predict.answer;
+  return (
+    <div className="rounded-2xl border border-amber-400/40 bg-amber-400/5 p-4">
+      <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-amber-300">
+        <Icon name="timer" size={14} />Predict the output before it plays
+      </div>
+      <p className="mb-3 text-sm text-slate-200">{predict.q}</p>
+      <div className="flex flex-col gap-2">
+        {predict.options.map((o, i) => (
+          <button key={i} disabled={pick !== null} onClick={() => setPick(i)}
+            className={`rounded-lg border px-3 py-2 text-left text-sm transition ${pick === null ? 'border-slate-700 hover:border-amber-300' : i === predict.answer ? 'border-emerald-400 bg-emerald-400/10' : pick === i ? 'border-red-400 bg-red-400/10' : 'border-slate-800 opacity-60'}`}>
+            {o}
+          </button>
+        ))}
+      </div>
+      {pick !== null && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <p className={`text-sm ${ok ? 'text-emerald-300' : 'text-amber-300'}`}>{ok ? 'Correct. ' : 'Not quite. '}{predict.why}</p>
+          <button onClick={onDone} className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm hover:border-cyan-400">Play the animation</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------- Quick check quiz ---------- */
 function Quiz({ quiz }) {
   const [pick, setPick] = useState(null);
   const ok = pick === quiz.answer;
+  useEffect(() => {
+    if (pick !== null) store.set('reactive-quiz', { ...store.get('reactive-quiz', {}), [quiz.q.slice(0, 60)]: pick === quiz.answer });
+  }, [pick]);
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
       <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-emerald-300">
@@ -1981,13 +2438,84 @@ function Glossary() {
   );
 }
 
+/* ---------- Local progress & preferences (saved in this browser only) ---------- */
+const store = {
+  get(key, fallback) {
+    try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch (e) { return fallback; }
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode: ignore */ }
+  },
+};
+
 /* ---------- App shell ---------- */
 function App() {
-  const [activeId, setActiveId] = useState(DEMOS[0].id);
+  const idFromHash = () => {
+    const h = (location.hash || '').replace('#/', '');
+    return h === 'glossary' || DEMOS.some((d) => d.id === h) ? h : DEMOS[0].id;
+  };
+  const [activeId, setActiveId] = useState(idFromHash);
+  const [filter, setFilter] = useState('');
+  const [navOpen, setNavOpen] = useState(false);
+  const [seen, setSeen] = useState(() => store.get('reactive-seen', []));
+  const [light, setLight] = useState(() => store.get('reactive-theme', 'dark') === 'light');
   const demo = DEMOS.find((d) => d.id === activeId);
+
+  const go = (id) => {
+    setActiveId(id);
+    if (location.hash !== '#/' + id) location.hash = '#/' + id;
+    setNavOpen(false);
+    window.scrollTo(0, 0);
+  };
+
+  // Deep links: #/debounce opens that lesson; the browser back button works too.
+  useEffect(() => {
+    const onHash = () => setActiveId(idFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  // Progress: remember every lesson the learner has opened.
+  useEffect(() => {
+    if (activeId !== 'glossary' && !seen.includes(activeId)) {
+      const next = [...seen, activeId];
+      setSeen(next);
+      store.set('reactive-seen', next);
+    }
+  }, [activeId]);
+
+  // Light / dark theme.
+  useEffect(() => {
+    document.documentElement.classList.toggle('light', light);
+    store.set('reactive-theme', light ? 'light' : 'dark');
+  }, [light]);
+
+  // Keyboard: arrows move between lessons, Space plays or pauses the animation.
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = (e.target && e.target.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const ids = DEMOS.map((d) => d.id);
+      const i = ids.indexOf(activeId);
+      if (e.key === 'ArrowDown' && i >= 0 && i < ids.length - 1) { e.preventDefault(); go(ids[i + 1]); }
+      else if (e.key === 'ArrowUp' && i > 0) { e.preventDefault(); go(ids[i - 1]); }
+      else if (e.key === ' ' && tag !== 'BUTTON' && activeId !== 'glossary') { e.preventDefault(); window.dispatchEvent(new Event('reactive-toggle')); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeId]);
+
+  const q = filter.trim().toLowerCase();
+  const matches = (d) => !q || (d.title + ' ' + d.sub + ' ' + (d.simple || '') + ' ' + (d.useCase || '')).toLowerCase().includes(q);
+  const viewed = seen.filter((id) => DEMOS.some((d) => d.id === id)).length;
+
   return (
     <div className="min-h-screen md:flex">
-      <aside className="border-b border-slate-800 bg-slate-900/80 md:sticky md:top-0 md:h-screen md:w-72 md:shrink-0 md:overflow-y-auto md:border-b-0 md:border-r">
+      <button onClick={() => setNavOpen((o) => !o)}
+        className="flex w-full items-center gap-2 border-b border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-200 md:hidden">
+        <Icon name="layers" size={16} />{navOpen ? 'Hide lessons' : 'Browse lessons'}
+      </button>
+      <aside className={`${navOpen ? 'block' : 'hidden'} border-b border-slate-800 bg-slate-900/80 md:sticky md:top-0 md:block md:h-screen md:w-72 md:shrink-0 md:overflow-y-auto md:border-b-0 md:border-r`}>
         <div className="flex items-center gap-3 px-5 py-4">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-purple-500 via-fuchsia-400 to-orange-400 text-slate-950">
             <Icon name="zap" size={18} />
@@ -1997,24 +2525,40 @@ function App() {
             <div className="text-[11px] text-slate-500">Flow · StateFlow · SharedFlow · AppState</div>
           </div>
         </div>
+        <div className="space-y-2 px-5 pb-3">
+          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search lessons…"
+            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+          <div className="flex items-center justify-between text-[11px] text-slate-500">
+            <span>{viewed} / {DEMOS.length} viewed · {Object.values(store.get('reactive-quiz', {})).filter(Boolean).length} quiz right</span>
+            <button onClick={() => setLight((l) => !l)} className="rounded-md border border-slate-700 px-2 py-0.5 hover:border-cyan-400">
+              {light ? 'Dark' : 'Light'} theme
+            </button>
+          </div>
+          <div className="text-[10px] text-slate-600">↑ ↓ move between lessons · Space play / pause</div>
+        </div>
         <nav className="pb-4">
-          <button onClick={() => setActiveId('glossary')}
+          <button onClick={() => go('glossary')}
             className={`flex w-full items-center gap-3 px-5 py-2.5 text-left text-sm font-semibold transition ${activeId === 'glossary' ? 'bg-purple-500/15 text-white shadow-[inset_3px_0_0_#a78bfa]' : 'text-purple-300 hover:bg-slate-800/60'}`}>
             <Icon name="book" size={15} />
             <span>Glossary</span>
           </button>
-          {CATS.map((cat, ci) => (
-            <div key={cat}>
-              <div className="px-5 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-widest text-slate-500">{ci + 1} · {cat}</div>
-              {DEMOS.filter((d) => d.cat === cat).map((d) => (
-                <button key={d.id} onClick={() => setActiveId(d.id)}
-                  className={`flex w-full items-center gap-3 px-5 py-2 text-left text-sm transition ${activeId === d.id ? 'bg-purple-500/15 text-white shadow-[inset_3px_0_0_#a78bfa]' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-100'}`}>
-                  <Icon name={d.icon} size={15} />
-                  <span className="truncate font-mono text-[13px]">{d.title}</span>
-                </button>
-              ))}
-            </div>
-          ))}
+          {CATS.map((cat, ci) => {
+            const items = DEMOS.filter((d) => d.cat === cat && matches(d));
+            if (!items.length) return null;
+            return (
+              <div key={cat}>
+                <div className="px-5 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-widest text-slate-500">{ci + 1} · {cat}</div>
+                {items.map((d) => (
+                  <button key={d.id} onClick={() => go(d.id)}
+                    className={`flex w-full items-center gap-3 px-5 py-2 text-left text-sm transition ${activeId === d.id ? 'bg-purple-500/15 text-white shadow-[inset_3px_0_0_#a78bfa]' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-100'}`}>
+                    <Icon name={d.icon} size={15} />
+                    <span className="truncate font-mono text-[13px]">{d.title}</span>
+                    {seen.includes(d.id) && <Icon name="check" size={12} className="ml-auto shrink-0 text-emerald-400" />}
+                  </button>
+                ))}
+              </div>
+            );
+          })}
         </nav>
       </aside>
       <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
