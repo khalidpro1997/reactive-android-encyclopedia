@@ -2144,6 +2144,8 @@ function DemoView({ demo }) {
         </div>
       </section>
 
+      <WhereCard id={demo.id} />
+
       {demo.quiz && <Quiz key={demo.id} quiz={demo.quiz} />}
     </div>
   );
@@ -2318,6 +2320,92 @@ function PhoneScreen({ demo, events, res, now }) {
         {alert && (
           <div className="mx-3 mb-3 rounded-lg bg-red-500/90 px-3 py-2 text-xs font-medium text-white">Snackbar · {String(alert.v)}</div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Where to use it (app layers) ---------- */
+const LAYERS = [
+  { key: 'ui', label: 'UI (Activity / Compose)' },
+  { key: 'vm', label: 'ViewModel' },
+  { key: 'repo', label: 'Repository' },
+  { key: 'data', label: 'Data source (DAO, API, sensors)' },
+];
+const WHERE = {
+  combine: ['vm', 'Combine the form fields into one "button enabled" state.'],
+  zip: ['vm', 'Pair two async results (for example a photo and its thumbnail) before updating state.'],
+  merge: ['vm', 'Several sources (database, push, refresh) feed one state update.'],
+  transform: ['vm', 'Recompute the cart total from price and quantity (or derivedStateOf in Compose).'],
+  map: ['repo', 'Convert API or database rows into domain models.'],
+  filter: ['vm', 'Skip requests that fail a rule, such as queries shorter than 4 characters.'],
+  distinct: ['vm', 'Stop repeating identical UI states.'],
+  scan: ['vm', 'Keep a running total for the screen.'],
+  debounce: ['vm', 'Wait for the user to stop typing before searching.'],
+  flatmap: ['vm', 'Each new query replaces the old search request.'],
+  conflate: ['ui', 'Draw only the newest value when the screen is slow to redraw.'],
+  flows: ['vm', 'The ViewModel exposes StateFlow (state) and SharedFlow (one-time events); the UI collects both.'],
+  sample: ['vm', 'Refresh a chart on a fixed schedule instead of on every raw sensor event.'],
+  timeout: ['repo', 'Wrap the network call so it gives up after a time limit.'],
+  take: ['vm', 'Keep only the first N results for a "top 3" section.'],
+  catch: ['repo', 'Turn a failure into cached data or an error result.'],
+  room: ['data', 'The DAO returns a Flow, so the database is the source of truth.'],
+  snapshot: ['ui', 'Compose LaunchedEffect watches scroll position and asks the ViewModel for the next page.'],
+  retry: ['repo', 'Retry the network call a couple of times before reporting an error.'],
+  flatmerge: ['repo', 'Download several items in parallel, with a concurrency limit.'],
+  buffer: ['repo', 'Keep every event in a queue while a slow save runs.'],
+  sharein: ['repo', 'Share one network stream between several ViewModels with shareIn.'],
+  callbackflow: ['data', 'Wrap a LocationCallback or a sensor listener as a Flow.'],
+  coldflow: ['repo', 'A flow { } block runs once per collector; add shareIn if you need one shared run.'],
+  oncompletion: ['repo', 'Cleanup (close the file, hide the progress bar) when a download ends.'],
+  retrywhen: ['repo', 'Retry a sync with backoff delays, not instantly.'],
+  channel: ['vm', 'A bounded queue (Channel) between the camera and the uploader.'],
+  workers: ['data', 'A pool of workers reads jobs from one channel.'],
+  concat: ['vm', 'Save edits one after another, in order.'],
+  combinetransform: ['vm', 'Emit only valid combinations, such as a valid order summary.'],
+  flowon: ['repo', 'Move slow work to Dispatchers.IO with flowOn.'],
+  statein: ['vm', 'stateIn turns the repository flow into state that survives rotation.'],
+  onstart: ['vm', 'Emit Loading as soon as the screen starts collecting.'],
+  channelflow: ['data', 'Several sensor coroutines send readings into one flow.'],
+  livedata: ['vm', 'The ViewModel exposes LiveData (legacy); the Fragment or Activity observes it.'],
+  rxjava: ['repo', 'In older code: subscribeOn for the network work, observeOn for UI results.'],
+  collectlatest: ['ui', 'Cancel the old drawing or navigation when a new value arrives.'],
+  transformlatest: ['vm', 'Emit Loading, then the result, and cancel old searches.'],
+  withindex: ['ui', 'Number list items or steps for display.'],
+  runningfold: ['vm', 'A balance or running total that starts at a known value.'],
+  turbine: ['test', 'Assert that the ViewModel or repository emits states in the right order.'],
+  datastore: ['data', 'DataStore wraps settings and exposes them as a Flow.'],
+  paging: ['vm', 'Pager builds PagingData; the UI shows it in a paged list.'],
+};
+
+function WhereCard({ id }) {
+  const entry = WHERE[id];
+  if (!entry) return null;
+  const [layer, text] = entry;
+  const isTest = layer === 'test';
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+      <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-cyan-300">
+        <Icon name="layers" size={14} />Where to use it
+      </div>
+      <div className="grid gap-4 sm:grid-cols-[220px_1fr] sm:items-center">
+        <div className="flex flex-col items-stretch gap-1">
+          {LAYERS.map((l, i) => {
+            const on = l.key === layer;
+            return (
+              <React.Fragment key={l.key}>
+                <div className={`rounded-lg border px-3 py-2 text-xs transition ${on ? 'border-cyan-400 bg-cyan-400/15 font-semibold text-white' : 'border-slate-800 text-slate-500'}`}>
+                  {l.label}
+                </div>
+                {i < LAYERS.length - 1 && <div className="text-center text-[10px] text-slate-600">↓ calls</div>}
+              </React.Fragment>
+            );
+          })}
+          <div className={`mt-2 rounded-lg border px-3 py-2 text-xs ${isTest ? 'border-cyan-400 bg-cyan-400/15 font-semibold text-white' : 'border-slate-800 text-slate-500'}`}>
+            Unit tests (Turbine) check any layer
+          </div>
+        </div>
+        <p className="text-sm leading-relaxed text-slate-300">{text}</p>
       </div>
     </div>
   );
