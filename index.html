@@ -2761,7 +2761,49 @@ const CHEAT_PAIRS = [
   ['“omit” (not a Flow word)', 'Use filter (keep matching), drop(n) (skip the first n) or takeWhile (stop at the first failure).'],
 ];
 
+// Example code shown when hovering (or tapping) a row in section 2. Keys match the "Use" column.
+const CHEAT_CODE = {
+  'callbackFlow': 'callbackFlow {\n    val listener = Listener { trySend(it) }\n    register(listener)\n    awaitClose { unregister(listener) }   // runs when the collector cancels\n}',
+  'channelFlow': 'channelFlow {\n    launch { sourceA.collect { send(it) } }\n    launch { sourceB.collect { send(it) } }\n}',
+  'flow { emit() }': 'flow {\n    emit(api.load())\n}',
+  'map (and mapNotNull to drop nulls)': 'flow.map { it.toDomain() }\nflow.mapNotNull { it.value }   // skips nulls',
+  'filter, drop(n), takeWhile': 'flow.filter { it.length >= 4 }\nflow.drop(2)              // skip the first 2\nflow.takeWhile { it < 10 } // stop at the first failure',
+  'distinctUntilChanged': 'flow.distinctUntilChanged()   // skips a value equal to the previous one',
+  'combine': 'combine(name, password) { n, p ->\n    n.isNotBlank() && p.length >= 8\n}',
+  'combineTransform': 'combineTransform(a, b) { x, y ->\n    if (x + y >= 10) emit(x + y)   // emit only when the rule passes\n}',
+  'zip': 'photos.zip(thumbs) { photo, thumb -> photo to thumb }',
+  'merge': 'merge(localChanges, pushEvents)',
+  'debounce': 'query.debounce(300)   // emit after 300 ms of silence',
+  'flatMapLatest (or transformLatest)': 'queries.flatMapLatest { q ->\n    flow { emit(api.search(q)) }   // old search is cancelled\n}',
+  'flatMapConcat': 'edits.flatMapConcat { edit ->\n    flow { emit(api.save(edit)) }   // one at a time, in order\n}',
+  'flatMapMerge(concurrency = N)': 'ids.flatMapMerge(concurrency = 2) { id ->\n    flow { emit(api.fetch(id)) }\n}',
+  'runningFold (or scan)': 'deposits.runningFold(0) { sum, amount -> sum + amount }',
+  'take(N)': 'results.take(3)   // complete after 3 values',
+  'onStart { emit(Loading) }': 'flow.onStart { emit(UiState.Loading) }',
+  'catch { emit(...) }': 'flow.catch { e -> emit(cachedItems) }',
+  'retryWhen { … delay(…) }': 'flow.retryWhen { cause, attempt ->\n    delay(1000L shl attempt.toInt())   // 1 s, 2 s, 4 s...\n    attempt < 3\n}',
+  'retry(n)': 'flow.retry(2) { it is IOException }',
+  'withTimeoutOrNull / timeout': 'withTimeoutOrNull(1500) { api.load() }   // null after 1.5 s',
+  'onCompletion': 'flow.onCompletion { file.close() }   // success, error, or cancel',
+  'flowOn(Dispatchers.IO)': 'flow.flowOn(Dispatchers.IO)   // everything above runs on IO',
+  'shareIn': 'flow.shareIn(scope, SharingStarted.WhileSubscribed(5000), replay = 1)',
+  'stateIn(…, WhileSubscribed(5000))': 'flow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), initial)',
+  'SharedFlow, or Channel and send()': 'private val _events = MutableSharedFlow<Event>()\nval events = _events.asSharedFlow()\n_events.emit(Event.Saved)',
+  'Channel(capacity)': 'val jobs = Channel<Job>(capacity = 2)\njobs.send(job)     // suspends when full',
+  'DataStore (Flow)': 'dataStore.data.map { prefs -> prefs[DARK_MODE] ?: false }',
+  'Room DAO returning Flow': '@Query("SELECT * FROM users")\nfun observeUsers(): Flow<List<User>>',
+  'Pager (PagingData)': 'Pager(PagingConfig(pageSize = 20)) { dao.pagingSource() }.flow',
+  'collectAsStateWithLifecycle': 'val state by vm.state.collectAsStateWithLifecycle()',
+  'produceState': 'val name by produceState("Loading…", userId) { value = repo.name(userId) }',
+  'rememberUpdatedState': 'val latest by rememberUpdatedState(onDone)',
+  'derivedStateOf': 'val showTop by remember { derivedStateOf { index > 8 } }',
+  'LiveData (legacy)': 'val user: LiveData<User> = _user',
+  'RxJava (subscribeOn / observeOn)': 'api.load()\n    .subscribeOn(Schedulers.io())\n    .observeOn(AndroidSchedulers.mainThread())\n    .subscribe { render(it) }',
+  'Turbine (awaitItem)': 'vm.state.test {\n    assertEquals(UiState.Loading, awaitItem())\n    cancelAndIgnoreRemainingEvents()\n}',
+};
+
 function CheatSheet() {
+  const [open, setOpen] = useState('');
   const [q, setQ] = useState('');
   const term = q.trim().toLowerCase();
   const hit = (...xs) => !term || xs.join(' ').toLowerCase().includes(term);
@@ -2794,7 +2836,7 @@ function CheatSheet() {
 
       {questions.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-cyan-300">2 · I want to…</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-cyan-300">2 · I want to… <span className="ml-2 normal-case tracking-normal text-slate-500">hover or tap a row for example code</span></h2>
           <div className="overflow-x-auto rounded-xl border border-slate-800">
             <table className="w-full text-left text-sm">
               <thead className="bg-slate-900 text-xs uppercase tracking-wider text-slate-400">
@@ -2802,11 +2844,21 @@ function CheatSheet() {
               </thead>
               <tbody>
                 {questions.map(([question, use, layer]) => (
-                  <tr key={question} className="border-t border-slate-800 align-top">
-                    <td className="px-4 py-2 text-slate-300">{question}</td>
-                    <td className="px-4 py-2 font-mono text-[13px] text-purple-200">{use}</td>
-                    <td className="px-4 py-2 text-slate-400">{layer}</td>
-                  </tr>
+                  <React.Fragment key={question}>
+                    <tr onMouseEnter={() => setOpen(use)} onMouseLeave={() => setOpen('')} onClick={() => setOpen(use)}
+                      className={`cursor-pointer border-t border-slate-800 align-top transition ${open === use ? 'bg-purple-500/10' : 'hover:bg-slate-900/60'}`}>
+                      <td className="px-4 py-2 text-slate-300">{question}</td>
+                      <td className="px-4 py-2 font-mono text-[13px] text-purple-200">{use}</td>
+                      <td className="px-4 py-2 text-slate-400">{layer}</td>
+                    </tr>
+                    {open === use && CHEAT_CODE[use] && (
+                      <tr className="bg-slate-950">
+                        <td colSpan={3} className="px-4 pb-3">
+                          <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 font-mono text-[12px] leading-relaxed text-slate-200">{CHEAT_CODE[use]}</pre>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
